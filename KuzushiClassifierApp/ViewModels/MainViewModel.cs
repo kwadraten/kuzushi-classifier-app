@@ -150,8 +150,9 @@ public partial class MainViewModel : ViewModelBase
                     StartupProgressFraction = p.Fraction ?? 0;
                     
                     // Map step to indicators
-                    if (p.Step > AssetPreparationStep.CheckingCache) IsModelReady = true;
-                    if (p.Step > AssetPreparationStep.DownloadingDataset) IsDatasetReady = true;
+                    if (p.Step >= AssetPreparationStep.DownloadingDataset) IsModelReady = true;
+                    if (p.Step >= AssetPreparationStep.LoadingDataset) IsDatasetReady = true;
+                    if (p.Step == AssetPreparationStep.Ready) IsEmbeddingIndexReady = true;
                 });
             });
 
