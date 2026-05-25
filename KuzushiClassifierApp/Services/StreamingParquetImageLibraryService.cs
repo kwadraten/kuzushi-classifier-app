@@ -13,14 +13,24 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
     }
 
     public async Task<IReadOnlyList<DatasetImage>> LoadImagesAsync(
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<AssetPreparationProgress>? progress = null)
     {
         var parquetFiles = GetParquetFiles();
         var images = new List<DatasetImage>();
 
-        foreach (var file in parquetFiles)
+        for (var fileIndex = 0; fileIndex < parquetFiles.Length; fileIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            var file = parquetFiles[fileIndex];
+            var fileName = Path.GetFileName(file);
+
+            progress?.Report(new AssetPreparationProgress(
+                AssetPreparationStep.LoadingDataset,
+                $"Scanning Parquet metadata: {fileName} ({fileIndex + 1} of {parquetFiles.Length}).",
+                Fraction: (double)fileIndex / parquetFiles.Length,
+                ItemsProcessed: images.Count));
 
             await using var fs = File.OpenRead(file);
             using var reader = await Parquet.ParquetReader

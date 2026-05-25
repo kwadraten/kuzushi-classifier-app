@@ -28,7 +28,7 @@ public sealed class StartupController(
             "Loading dataset metadata."));
 
         var images = await imageLibraryService
-            .LoadImagesAsync(cancellationToken)
+            .LoadImagesAsync(cancellationToken, progress)
             .ConfigureAwait(false);
 
         progress?.Report(new AssetPreparationProgress(
@@ -91,7 +91,9 @@ public sealed class StartupController(
             progress?.Report(new AssetPreparationProgress(
                 AssetPreparationStep.CalculatingEmbeddings,
                 $"Calculating embedding {index + 1} of {totalCount}.",
-                totalCount == 0 ? 1 : (double)index / totalCount));
+                totalCount == 0 ? 1 : (double)index / totalCount,
+                ItemsProcessed: index,
+                TotalItems: totalCount));
 
             var preparedImage = await imagePreprocessingService
                 .PrepareForModelAsync(kuzushiImage, cancellationToken)

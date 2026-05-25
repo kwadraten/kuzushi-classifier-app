@@ -19,7 +19,8 @@ public sealed class JsonLinesDevelopmentImageLibraryService : IImageLibraryServi
     }
 
     public async Task<IReadOnlyList<DatasetImage>> LoadImagesAsync(
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<AssetPreparationProgress>? progress = null)
     {
         if (_images is not null)
         {

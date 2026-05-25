@@ -5,7 +5,8 @@ namespace KuzushiClassifierApp.Services;
 public interface IImageLibraryService
 {
     Task<IReadOnlyList<DatasetImage>> LoadImagesAsync(
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IProgress<AssetPreparationProgress>? progress = null);
 
     Task<KuzushiImage> LoadImageAsync(
         DatasetImage image,

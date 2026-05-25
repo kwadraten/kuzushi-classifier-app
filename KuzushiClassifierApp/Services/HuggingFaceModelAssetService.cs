@@ -150,21 +150,17 @@ public sealed class HuggingFaceModelAssetService :
                 continue;
             }
 
-            progress?.Report(new AssetPreparationProgress(
-                AssetPreparationStep.DownloadingModels,
-                $"Downloading {fileName} ({i + 1} of {ModelFileNames.Length}).",
-                (double)i / ModelFileNames.Length));
-
             var url = $"{HuggingFaceRawBase}/{_modelRepo}/resolve/main/{fileName}";
 
             try
             {
-                var bytes = await _httpClient
-                    .GetByteArrayAsync(url, cancellationToken)
-                    .ConfigureAwait(false);
-
-                await File
-                    .WriteAllBytesAsync(filePath, bytes, cancellationToken)
+                await DownloadWithProgressAsync(
+                    url,
+                    filePath,
+                    AssetPreparationStep.DownloadingModels,
+                    $"{fileName} ({i + 1} of {ModelFileNames.Length})",
+                    progress,
+                    cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (HttpRequestException ex)
@@ -221,21 +217,87 @@ public sealed class HuggingFaceModelAssetService :
                     continue;
                 }
 
-                progress?.Report(new AssetPreparationProgress(
-                    AssetPreparationStep.DownloadingDataset,
-                    $"Downloading {fileName} ({i + 1} of {parquetFiles.Length}).",
-                    (double)i / parquetFiles.Length));
-
                 var url = $"{HuggingFaceRawBase}/datasets/{_datasetRepo}/resolve/main/{relativePath}";
-                var bytes = await _httpClient
-                    .GetByteArrayAsync(url, cancellationToken)
-                    .ConfigureAwait(false);
 
-                await File
-                    .WriteAllBytesAsync(filePath, bytes, cancellationToken)
+                await DownloadWithProgressAsync(
+                    url,
+                    filePath,
+                    AssetPreparationStep.DownloadingDataset,
+                    $"{fileName} ({i + 1} of {parquetFiles.Length})",
+                    progress,
+                    cancellationToken)
                     .ConfigureAwait(false);
             }
         }
+    }
+
+    private async Task DownloadWithProgressAsync(
+        string url,
+        string filePath,
+        AssetPreparationStep step,
+        string label,
+        IProgress<AssetPreparationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient
+            .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            .ConfigureAwait(false);
+
+        response.EnsureSuccessStatusCode();
+
+        var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+        var downloaded = 0L;
+        var buffer = new byte[8192];
+
+        var tempPath = filePath + ".download";
+
+        await using var contentStream = await response.Content
+            .ReadAsStreamAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        await using var fileStream = new FileStream(
+            tempPath, FileMode.Create, FileAccess.Write, FileShare.None,
+            buffer.Length, useAsync: true);
+
+        while (true)
+        {
+            var read = await contentStream
+                .ReadAsync(buffer, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (read == 0)
+            {
+                break;
+            }
+
+            await fileStream
+                .WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+                .ConfigureAwait(false);
+
+            downloaded += read;
+
+            progress?.Report(new AssetPreparationProgress(
+                step,
+                $"Downloading {label}  ({FormatBytes(downloaded)}" +
+                    (totalBytes > 0 ? $" / {FormatBytes(totalBytes)}" : "") +
+                    ")",
+                Fraction: totalBytes > 0 ? (double)downloaded / totalBytes : null,
+                BytesDownloaded: downloaded,
+                TotalBytes: totalBytes > 0 ? totalBytes : null));
+        }
+
+        File.Move(tempPath, filePath, overwrite: true);
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        return bytes switch
+        {
+            >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
+            >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+            >= 1024 => $"{bytes / 1024.0:F1} KB",
+            _ => $"{bytes} B",
+        };
     }
 
     private async Task<string[]> ListParquetFilesAsync(CancellationToken cancellationToken)
