@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="KuzushiClassifierApp.Android/KuzushiClassifierApp.Android.csproj">
+    <Deploy />
+  </Project>
+  <Project Path="KuzushiClassifierApp.Desktop/KuzushiClassifierApp.Desktop.csproj" />
+  <Project Path="KuzushiClassifierApp/KuzushiClassifierApp.csproj" />
+</Solution>

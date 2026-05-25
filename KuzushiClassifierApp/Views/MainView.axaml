@@ -1,0 +1,249 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:KuzushiClassifierApp.ViewModels"
+             xmlns:iconPacks="clr-namespace:IconPacks.Avalonia.MaterialDesign;assembly=IconPacks.Avalonia.MaterialDesign"
+             mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="800"
+             x:Class="KuzushiClassifierApp.Views.MainView"
+             x:DataType="vm:MainViewModel"
+             Background="{StaticResource SurfaceBrush}"
+             SizeChanged="OnSizeChanged">
+
+  <Grid RowDefinitions="Auto, *">
+    <!-- 1. Top AppBar / Fixed Title Bar -->
+    <Border Grid.Row="0" Height="64" BorderBrush="{StaticResource OutlineVariantBrush}" BorderThickness="0 0 0 1" Background="White">
+      <Grid ColumnDefinitions="Auto, *, Auto" Margin="24 0">
+        <!-- Brand Title & Icon -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <Border Width="36" Height="36" Background="{StaticResource BrandBlueBrush}" CornerRadius="8" VerticalAlignment="Center">
+            <iconPacks:PackIconMaterialDesign Kind="Analytics" Width="20" Height="20" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Text="本地崩字识别" FontSize="20" FontWeight="Bold" Foreground="{StaticResource OnSurfaceBrush}" VerticalAlignment="Center"/>
+          <Border Background="{StaticResource SuccessBgBrush}" CornerRadius="12" Padding="8 4" Margin="8 0 0 0" VerticalAlignment="Center">
+            <TextBlock Text="Vision Analytics" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource SuccessBrush}"/>
+          </Border>
+        </StackPanel>
+
+        <!-- Model Ready Status Overlay (Header Right) -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="6" ToolTip.Tip="Classifier ONNX Model Status">
+            <Ellipse Width="8" Height="8" Fill="{Binding ModelStatusBrush}" VerticalAlignment="Center"/>
+            <TextBlock Text="模型已就绪" FontSize="12" FontWeight="Medium" Foreground="{StaticResource OnSurfaceVariantBrush}" VerticalAlignment="Center"/>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6" ToolTip.Tip="Indexed database items status">
+            <Ellipse Width="8" Height="8" Fill="{Binding EmbeddingIndexStatusBrush}" VerticalAlignment="Center"/>
+            <TextBlock Text="索引库已加载" FontSize="12" FontWeight="Medium" Foreground="{StaticResource OnSurfaceVariantBrush}" VerticalAlignment="Center"/>
+          </StackPanel>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- 2. Main Content Scroll Grid -->
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <Grid Margin="24" ColumnDefinitions="*">
+        
+        <!-- Inner Responsive Layout Grid -->
+        <!-- We use a Grid that can adapt: on standard screens it spans side-by-side -->
+        <Grid RowDefinitions="Auto" ColumnDefinitions="*, *" Name="ResponsiveContentGrid">
+          
+          <!-- LEFT SIDEBAR: Upload & Drawings & Model Preparation -->
+          <StackPanel Grid.Row="0" Grid.Column="0" Name="LeftColumnPanel" Margin="0 0 12 0" Spacing="16">
+            
+            <!-- A. File Upload & Drawing Panel -->
+            <Border Classes="Card">
+              <StackPanel Spacing="16">
+                <TextBlock Text="单字输入源" FontSize="16" FontWeight="Bold" Foreground="{StaticResource OnSurfaceBrush}"/>
+                
+                <!-- Tab Switching Panel -->
+                <Grid ColumnDefinitions="*, *">
+                  <Button Grid.Column="0" Content="图片上传" 
+                          Click="OnUploadTabClick"
+                          Background="{Binding UploadTabBackground}"
+                          Foreground="{Binding UploadTabForeground}"
+                          HorizontalAlignment="Stretch" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                  <Button Grid.Column="1" Content="手写输入" 
+                          Click="OnHandwritingTabClick"
+                          Background="{Binding HandwritingTabBackground}"
+                          Foreground="{Binding HandwritingTabForeground}"
+                          HorizontalAlignment="Stretch" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                </Grid>
+
+                <!-- TAB 0: File Pick Dropzone -->
+                <Panel IsVisible="{Binding ActiveTab, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}">
+                  <Border Name="DropZoneBorder" Height="240" CornerRadius="8" Background="{StaticResource SurfaceLowBrush}" PointerPressed="OnDropZoneClick" DragDrop.AllowDrop="True">
+                    <Grid>
+                      <Rectangle Stroke="{StaticResource OutlineVariantBrush}" StrokeThickness="2" StrokeDashArray="4, 4" RadiusX="8" RadiusY="8"/>
+                      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12">
+                        <Border Width="56" Height="56" CornerRadius="28" Background="#E3F2FD" HorizontalAlignment="Center">
+                          <iconPacks:PackIconMaterialDesign Kind="Upload" Width="28" Height="28" Foreground="{StaticResource BrandBlueBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Text="拖拽单字图像至此，或点击上传" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource OnSurfaceBrush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="支持 JPG, PNG, HEIC 格式" FontSize="12" Foreground="{StaticResource OnSurfaceVariantBrush}" HorizontalAlignment="Center"/>
+                        
+                        <Button Content="选择本地文件" Width="140" Margin="0 8 0 0" Classes="Secondary" HorizontalAlignment="Center" Click="OnSelectFileClick"/>
+                      </StackPanel>
+
+                      <!-- Selected Image Preview Overlay -->
+                      <Border IsVisible="{Binding IsImageSelected}" CornerRadius="6" Margin="12" ClipToBounds="True" Background="White" BorderBrush="{StaticResource OutlineVariantBrush}" BorderThickness="1">
+                        <Grid>
+                          <Image Source="{Binding SelectedImagePreview}" Stretch="Uniform" Margin="8"/>
+                          <Button Content="清除" Classes="Secondary" VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8" Command="{Binding ResetCommand}"/>
+                        </Grid>
+                      </Border>
+                    </Grid>
+                  </Border>
+                </Panel>
+
+                <!-- TAB 1: Handwriting Drawing Canvas -->
+                <Panel IsVisible="{Binding ActiveTab, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=1}">
+                  <Border Height="240" BorderBrush="{StaticResource OutlineVariantBrush}" BorderThickness="1" CornerRadius="8" Background="White" ClipToBounds="True">
+                    <Grid>
+                      <Canvas Name="DrawingCanvas" Background="White" Width="224" Height="224" HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Cross"
+                              PointerPressed="OnCanvasPointerPressed"
+                              PointerMoved="OnCanvasPointerMoved"
+                              PointerReleased="OnCanvasPointerReleased">
+                      </Canvas>
+                      
+                      <!-- Handwriting Helpers Overlay -->
+                      <TextBlock Text="在此手写书写字形" Foreground="{StaticResource OutlineVariantBrush}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0 0 0 12" IsHitTestVisible="False"/>
+                      <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8">
+                        <Button Classes="Secondary" Click="OnClearCanvasClick">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <iconPacks:PackIconMaterialDesign Kind="Delete" Width="14" Height="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="清除画板" FontSize="12" VerticalAlignment="Center"/>
+                          </StackPanel>
+                        </Button>
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </Panel>
+              </StackPanel>
+            </Border>
+
+            <!-- B. Prep / Download Info Card -->
+            <Border Classes="Card" IsVisible="{Binding !IsInitialized}">
+              <StackPanel Spacing="12">
+                <TextBlock Text="应用资源准备" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OnSurfaceBrush}"/>
+                <TextBlock Text="{Binding StartupStatusText}" FontSize="13" Foreground="{StaticResource OnSurfaceVariantBrush}"/>
+                <ProgressBar Value="{Binding StartupProgressFraction}" Minimum="0" Maximum="1" Height="8" Foreground="{StaticResource BrandBlueBrush}" CornerRadius="4"/>
+              </StackPanel>
+            </Border>
+
+            <!-- C. Action Predict Button -->
+            <Border Classes="Card" IsVisible="{Binding IsInitialized}">
+              <StackPanel Spacing="8">
+                <Button Classes="Primary" HorizontalAlignment="Stretch" Height="54" Click="OnPredictClick" IsEnabled="{Binding !IsAnalyzing}">
+                  <Grid ColumnDefinitions="Auto, *">
+                    <Panel Grid.Column="0" IsVisible="{Binding IsAnalyzing}" Width="20" Height="20" Margin="0 0 10 0">
+                      <ProgressBar IsIndeterminate="True" Height="4" Foreground="White" VerticalAlignment="Center"/>
+                    </Panel>
+                    <Panel Grid.Column="0" IsVisible="{Binding !IsAnalyzing}" Width="20" Height="20" Margin="0 0 10 0">
+                      <iconPacks:PackIconMaterialDesign Kind="AutoAwesome" Width="18" Height="18" Foreground="White" VerticalAlignment="Center"/>
+                    </Panel>
+                    <TextBlock Grid.Column="1" Text="{Binding PredictButtonText}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                  </Grid>
+                </Button>
+                <TextBlock Text="{Binding AnalysisProgressText}" FontSize="12" Foreground="{StaticResource OnSurfaceVariantBrush}" HorizontalAlignment="Center"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- RIGHT COLUMN: Predictions & Similarity Results -->
+          <StackPanel Grid.Row="0" Grid.Column="1" Name="RightColumnPanel" Margin="12 0 0 0" Spacing="16">
+            
+            <!-- A. Top 10 Predictions Card -->
+            <Border Classes="Card" MinHeight="220">
+              <StackPanel Spacing="16">
+                <Grid ColumnDefinitions="*, Auto">
+                  <TextBlock Grid.Column="0" Text="单字识别预测" FontSize="18" FontWeight="Bold" Foreground="{StaticResource OnSurfaceBrush}"/>
+                  <Border Grid.Column="1" Background="{StaticResource PrimaryContainerBrush}" CornerRadius="12" Padding="10 4">
+                    <TextBlock Text="TOP 10 候选" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                  </Border>
+                </Grid>
+
+                <Panel MinHeight="100">
+                  <!-- Empty Placeholder -->
+                  <TextBlock IsVisible="{Binding !HasResults}" Text="暂无识别数据。请在左侧上传图像或手写汉字后，点击【开始识别预测】" 
+                             FontSize="14" Foreground="{StaticResource OnSurfaceVariantBrush}" 
+                             HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" Margin="0 24"/>
+
+                  <!-- Loading state -->
+                  <StackPanel IsVisible="{Binding IsAnalyzing}" VerticalAlignment="Center" Spacing="12">
+                    <ProgressBar IsIndeterminate="True" Height="6" Foreground="{StaticResource BrandBlueBrush}"/>
+                  </StackPanel>
+
+                  <!-- Prediction Items List -->
+                  <ItemsControl IsVisible="{Binding HasResults}" ItemsSource="{Binding PredictionCandidates}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid ColumnDefinitions="Auto, *, Auto" Margin="0 6" Height="28">
+                          <TextBlock Grid.Column="0" Text="{Binding Label}" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource OnSurfaceBrush}" VerticalAlignment="Center" Width="40" Margin="0 0 12 0"/>
+                          <ProgressBar Grid.Column="1" Value="{Binding Confidence}" Minimum="0" Maximum="1" Height="8" Foreground="{StaticResource BrandBlueBrush}" Background="{StaticResource SurfaceContainerHighestBrush}" CornerRadius="4" VerticalAlignment="Center"/>
+                          <TextBlock Grid.Column="2" Text="{Binding Confidence, StringFormat={}{0:P1}}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource BrandBlueBrush}" VerticalAlignment="Center" Width="60" TextAlignment="Right" Margin="12 0 0 0"/>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Panel>
+              </StackPanel>
+            </Border>
+
+            <!-- B. Similar Images Gallery Card -->
+            <Border Classes="Card" MinHeight="260">
+              <StackPanel Spacing="16">
+                <TextBlock Text="相似样本库匹配" FontSize="18" FontWeight="Bold" Foreground="{StaticResource OnSurfaceBrush}"/>
+                
+                <Panel MinHeight="120">
+                  <!-- Empty Placeholder -->
+                  <TextBlock IsVisible="{Binding !HasResults}" Text="暂无相似样本。识别预测完成后，在此展示从字形库中检索到的 top-10 最相似字形" 
+                             FontSize="14" Foreground="{StaticResource OnSurfaceVariantBrush}" 
+                             HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" Margin="0 24"/>
+
+                  <!-- Similar items wrap gallery -->
+                  <ItemsControl IsVisible="{Binding HasResults}" ItemsSource="{Binding SimilarImages}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border BorderBrush="{StaticResource OutlineVariantBrush}" BorderThickness="1" CornerRadius="8" Width="105" Height="130" Margin="6" ClipToBounds="True" Background="{StaticResource SurfaceLowBrush}">
+                          <Grid RowDefinitions="*, Auto">
+                            <Panel Grid.Row="0">
+                              <!-- Placeholder while downloading -->
+                              <Grid IsVisible="{Binding IsLoadingImage}" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <TextBlock Text="加载中..." FontSize="10" Foreground="{StaticResource OnSurfaceVariantBrush}"/>
+                              </Grid>
+                              
+                              <!-- Image Thumb -->
+                              <Image Source="{Binding Image}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                              
+                              <!-- Similarity Badge overlay -->
+                              <Border Background="#A0000000" CornerRadius="4" Padding="4 2" Margin="4" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                <TextBlock Text="{Binding MatchText}" FontSize="8" Foreground="White" FontWeight="Bold"/>
+                              </Border>
+                            </Panel>
+
+                            <!-- Label Bar -->
+                            <Border Grid.Row="1" Background="{StaticResource SurfaceContainerHighestBrush}" Padding="4">
+                              <TextBlock Text="{Binding Label}" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" Foreground="{StaticResource OnSurfaceBrush}"/>
+                            </Border>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Panel>
+              </StackPanel>
+            </Border>
+
+          </StackPanel>
+          
+        </Grid>
+      </Grid>
+    </ScrollViewer>
+  </Grid>
+
+</UserControl>

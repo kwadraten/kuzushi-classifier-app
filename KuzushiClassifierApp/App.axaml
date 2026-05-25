@@ -1,0 +1,99 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:KuzushiClassifierApp"
+             x:Class="KuzushiClassifierApp.App"
+             RequestedThemeVariant="Default">
+             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+
+    <Application.DataTemplates>
+        <local:ViewLocator/>
+    </Application.DataTemplates>
+
+    <Application.Resources>
+        <!-- Colors based on DESIGN.md -->
+        <Color x:Key="BrandBlueColor">#005FAA</Color>
+        <Color x:Key="PrimaryContainerColor">#0078D4</Color>
+        <Color x:Key="SurfaceColor">#FDF8F6</Color>
+        <Color x:Key="SurfaceLowColor">#F7F3F1</Color>
+        <Color x:Key="SurfaceContainerColor">#F1EDEB</Color>
+        <Color x:Key="SurfaceContainerHighestColor">#E6E2E0</Color>
+        <Color x:Key="OnSurfaceColor">#1C1B1B</Color>
+        <Color x:Key="OnSurfaceVariantColor">#404752</Color>
+        <Color x:Key="OutlineColor">#717783</Color>
+        <Color x:Key="OutlineVariantColor">#C0C7D4</Color>
+        
+        <Color x:Key="SuccessColor">#107C10</Color>
+        <Color x:Key="SuccessBgColor">#E1F4E1</Color>
+
+        <!-- Solid Brushes -->
+        <SolidColorBrush x:Key="BrandBlueBrush" Color="{StaticResource BrandBlueColor}"/>
+        <SolidColorBrush x:Key="PrimaryContainerBrush" Color="{StaticResource PrimaryContainerColor}"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}"/>
+        <SolidColorBrush x:Key="SurfaceLowBrush" Color="{StaticResource SurfaceLowColor}"/>
+        <SolidColorBrush x:Key="SurfaceContainerBrush" Color="{StaticResource SurfaceContainerColor}"/>
+        <SolidColorBrush x:Key="SurfaceContainerHighestBrush" Color="{StaticResource SurfaceContainerHighestColor}"/>
+        <SolidColorBrush x:Key="OnSurfaceBrush" Color="{StaticResource OnSurfaceColor}"/>
+        <SolidColorBrush x:Key="OnSurfaceVariantBrush" Color="{StaticResource OnSurfaceVariantColor}"/>
+        <SolidColorBrush x:Key="OutlineBrush" Color="{StaticResource OutlineColor}"/>
+        <SolidColorBrush x:Key="OutlineVariantBrush" Color="{StaticResource OutlineVariantColor}"/>
+        
+        <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
+        <SolidColorBrush x:Key="SuccessBgBrush" Color="{StaticResource SuccessBgColor}"/>
+        <SolidColorBrush x:Key="WhiteBrush" Color="White"/>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <!-- Custom Styles -->
+        <Style Selector="Border.Card">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="{StaticResource OutlineVariantBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="BoxShadow" Value="0 2 8 0 #0A000000" />
+        </Style>
+        <Style Selector="Button.Primary">
+            <Setter Property="Background" Value="{StaticResource BrandBlueBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Padding" Value="16 12" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.075" Easing="QuadraticEaseOut" />
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.Primary:pointerover">
+            <Setter Property="Background" Value="{StaticResource PrimaryContainerBrush}" />
+        </Style>
+        <Style Selector="Button.Primary:pressed">
+            <Setter Property="RenderTransform" Value="scale(0.97)" />
+        </Style>
+        <Style Selector="Button.Secondary">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="Foreground" Value="{StaticResource OnSurfaceVariantBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource OutlineBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="12 8" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.075" Easing="QuadraticEaseOut" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.Secondary:pointerover">
+            <Setter Property="Background" Value="{StaticResource SurfaceLowBrush}" />
+        </Style>
+        <Style Selector="Button.Secondary:pressed">
+            <Setter Property="RenderTransform" Value="scale(0.97)" />
+        </Style>
+    </Application.Styles>
+</Application>
