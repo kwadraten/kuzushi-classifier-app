@@ -21,13 +21,21 @@ public partial class MainView : UserControl
     {
         InitializeComponent();
         
+        var props = System.Linq.Enumerable.Select(typeof(Avalonia.Input.IDataTransfer).GetProperties(), p => p.Name + " (" + p.PropertyType.Name + ")");
+        var itemType = typeof(Avalonia.Input.IDataTransfer).GetProperty("Items").PropertyType;
+        // Let's inspect the element type if it is a collection
+        var elementType = itemType.IsGenericType ? itemType.GetGenericArguments()[0] : typeof(object);
+        var elemProps = System.Linq.Enumerable.Select(elementType.GetProperties(), p => p.Name + " (" + p.PropertyType.Name + ")");
+        throw new Exception("Props: " + string.Join(", ", props) + " | Elem: " + elementType.FullName + " | ElemProps: " + string.Join(", ", elemProps));
+        
         // Add drag & drop handlers
-        AddHandler(DragDrop.DragOverEvent, DragOverHandler);
-        AddHandler(DragDrop.DropEvent, DropHandler);
+        // AddHandler(DragDrop.DragOverEvent, DragOverHandler);
+        // AddHandler(DragDrop.DropEvent, DropHandler);
     }
 
     private void DragOverHandler(object? sender, DragEventArgs e)
     {
+        /*
         if (e.Data.Contains(DataFormats.Files))
         {
             e.DragEffects = DragDropEffects.Copy;
@@ -36,10 +44,12 @@ public partial class MainView : UserControl
         {
             e.DragEffects = DragDropEffects.None;
         }
+        */
     }
 
     private async void DropHandler(object? sender, DragEventArgs e)
     {
+        /*
         if (e.Data.Contains(DataFormats.Files))
         {
             var files = e.Data.GetFiles();
@@ -52,6 +62,7 @@ public partial class MainView : UserControl
                 }
             }
         }
+        */
     }
 
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
