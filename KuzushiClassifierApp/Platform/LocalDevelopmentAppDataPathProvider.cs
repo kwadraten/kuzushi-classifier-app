@@ -30,6 +30,28 @@ public sealed class LocalDevelopmentAppDataPathProvider : IAppDataPathProvider
 
     private static string FindDevDataDirectory(string startDirectory)
     {
+        if (System.OperatingSystem.IsAndroid())
+        {
+            var androidCandidates = new[]
+            {
+                "/sdcard/KuzushiClassifierApp/dev_data",
+                "/storage/emulated/0/KuzushiClassifierApp/dev_data",
+                System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal), "dev_data")
+            };
+
+            foreach (var candidate in androidCandidates)
+            {
+                if (System.IO.Directory.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            var fallback = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal), "dev_data");
+            System.IO.Directory.CreateDirectory(fallback);
+            return fallback;
+        }
+
         var current = new DirectoryInfo(Path.GetFullPath(startDirectory));
 
         while (current is not null)
