@@ -43,7 +43,10 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
 
             if (charField is null)
             {
-                continue;
+                var found = string.Join(", ", dataFields.Select(f => f.Name));
+                throw new InvalidOperationException(
+                    $"Column 'char' not found in Parquet file {fileName}. " +
+                    $"Available columns: [{found}]");
             }
 
             for (var rgi = 0; rgi < reader.RowGroupCount; rgi++)
@@ -117,7 +120,13 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
 
             if (imageField is null || charField is null)
             {
-                continue;
+                var found = string.Join(", ", dataFields.Select(f => f.Name));
+                var missing = imageField is null ? "'image'/'bytes'" : "";
+                missing += imageField is null && charField is null ? " and " : "";
+                missing += charField is null ? "'char'" : "";
+                throw new InvalidOperationException(
+                    $"Required column(s) {missing} not found in Parquet file {Path.GetFileName(file)}. " +
+                    $"Available columns: [{found}]");
             }
 
             for (var rgi = 0; rgi < reader.RowGroupCount; rgi++)
@@ -212,7 +221,10 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
 
         if (imageField is null)
         {
-            return Array.Empty<byte>();
+            var found = string.Join(", ", dataFields.Select(f => f.Name));
+            throw new InvalidOperationException(
+                $"Column 'image'/'bytes' not found in Parquet file {Path.GetFileName(filePath)}. " +
+                $"Available columns: [{found}]");
         }
 
         using var rowGroupReader = reader.OpenRowGroupReader(rowGroup);
