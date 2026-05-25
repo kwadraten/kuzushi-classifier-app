@@ -32,15 +32,26 @@ public sealed partial class SimilarImageUiModel : ObservableObject
         LocalPath = localPath;
     }
 
-    public async Task LoadImageAsync(CancellationToken cancellationToken = default)
+    public async Task LoadImageAsync(KuzushiClassifierApp.Services.IImageLibraryService? libraryService, CancellationToken cancellationToken = default)
     {
         IsLoadingImage = true;
         try
         {
             byte[] bytes;
 
+            if (libraryService != null)
+            {
+                var datasetImage = new KuzushiClassifierApp.Models.DatasetImage(
+                    Id: string.Empty,
+                    Label: Label,
+                    SourceUri: SourceUri,
+                    LocalPath: LocalPath
+                );
+                var kuzushiImage = await libraryService.LoadImageAsync(datasetImage, cancellationToken).ConfigureAwait(false);
+                bytes = kuzushiImage.Bytes;
+            }
             // Check if local file exists on disk first
-            if (!string.IsNullOrEmpty(LocalPath) && File.Exists(LocalPath))
+            else if (!string.IsNullOrEmpty(LocalPath) && File.Exists(LocalPath))
             {
                 bytes = await File.ReadAllBytesAsync(LocalPath, cancellationToken).ConfigureAwait(false);
             }

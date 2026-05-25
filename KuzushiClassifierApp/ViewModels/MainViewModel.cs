@@ -117,6 +117,7 @@ public partial class MainViewModel : ViewModelBase
     }
 
     private static readonly BusinessServices DevServices = BusinessServices.Create();
+    private static readonly IImageLibraryService ResolvedImageLibraryService = DevServices.ImageLibraryService;
 
     /// <summary>
     /// Parameterless constructor for XAML designer and standalone UI testing
@@ -265,7 +266,7 @@ public partial class MainViewModel : ViewModelBase
                 Avalonia.Threading.Dispatcher.UIThread.Post(() => SimilarImages.Add(uiModel));
                 
                 // Triggers async loading of the image thumbnail in the background
-                await uiModel.LoadImageAsync(_analysisCts.Token).ConfigureAwait(false);
+                await uiModel.LoadImageAsync(ResolvedImageLibraryService, _analysisCts.Token).ConfigureAwait(false);
             });
 
             await Task.WhenAll(loadTasks);
