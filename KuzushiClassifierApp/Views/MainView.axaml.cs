@@ -15,7 +15,7 @@ namespace KuzushiClassifierApp.Views;
 
 public partial class MainView : UserControl
 {
-    private Polyline? _currentLine;
+    private Point? _lastPoint;
 
     public MainView()
     {
@@ -163,33 +163,34 @@ public partial class MainView : UserControl
         var properties = e.GetCurrentPoint(DrawingCanvas).Properties;
         if (properties.IsLeftButtonPressed)
         {
-            var point = e.GetPosition(DrawingCanvas);
-            _currentLine = new Polyline
-            {
-                Stroke = Brushes.Black,
-                StrokeThickness = 8,
-                StrokeLineCap = PenLineCap.Round,
-                StrokeJoin = PenLineJoin.Round,
-                Points = new Points { point }
-            };
-            DrawingCanvas.Children.Add(_currentLine);
+            _lastPoint = e.GetPosition(DrawingCanvas);
             e.Handled = true;
         }
     }
 
     private void OnCanvasPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_currentLine != null)
+        var properties = e.GetCurrentPoint(DrawingCanvas).Properties;
+        if (properties.IsLeftButtonPressed && _lastPoint != null)
         {
-            var point = e.GetPosition(DrawingCanvas);
-            _currentLine.Points.Add(point);
+            var currentPoint = e.GetPosition(DrawingCanvas);
+            var line = new Line
+            {
+                Stroke = Brushes.Black,
+                StrokeThickness = 8,
+                StrokeLineCap = PenLineCap.Round,
+                StartPoint = _lastPoint.Value,
+                EndPoint = currentPoint
+            };
+            DrawingCanvas.Children.Add(line);
+            _lastPoint = currentPoint;
             e.Handled = true;
         }
     }
 
     private void OnCanvasPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        _currentLine = null;
+        _lastPoint = null;
         e.Handled = true;
     }
 
@@ -227,6 +228,10 @@ public partial class MainView : UserControl
         int width = 224;
         int height = 224;
 
+        // Temporarily set canvas background to White for solid white background in exported image
+        var originalBackground = DrawingCanvas.Background;
+        DrawingCanvas.Background = Brushes.White;
+
         var renderTarget = new RenderTargetBitmap(new PixelSize(width, height));
         
         // Temporarily force update layout
@@ -234,6 +239,9 @@ public partial class MainView : UserControl
         DrawingCanvas.Arrange(new Rect(0, 0, width, height));
         
         renderTarget.Render(DrawingCanvas);
+
+        // Restore transparent background for UI visibility of grid lines
+        DrawingCanvas.Background = originalBackground;
 
         using var ms = new MemoryStream();
         renderTarget.Save(ms);

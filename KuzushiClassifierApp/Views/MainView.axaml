@@ -3,7 +3,6 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:KuzushiClassifierApp.ViewModels"
-             xmlns:iconPacks="clr-namespace:IconPacks.Avalonia.MaterialDesign;assembly=IconPacks.Avalonia.MaterialDesign"
              mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="800"
              x:Class="KuzushiClassifierApp.Views.MainView"
              x:DataType="vm:MainViewModel"
@@ -17,7 +16,7 @@
         <!-- Brand Title & Icon -->
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
           <Border Width="36" Height="36" Background="{StaticResource BrandBlueBrush}" CornerRadius="8" VerticalAlignment="Center">
-            <iconPacks:PackIconMaterialDesign Kind="Analytics" Width="20" Height="20" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <PathIcon Data="M19,3H5C3.9,3 3,3.9 3,5V19C3,20.1 3.9,21 5,21H19C20.1,21 21,20.1 21,19V5C21,3.9 20.1,3 19,3M9,17H7V10H9V17M13,17H11V7H13V17M17,17H15V13H17V17Z" Width="20" Height="20" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
           <TextBlock Text="本地崩字识别" FontSize="20" FontWeight="Bold" Foreground="{StaticResource OnSurfaceBrush}" VerticalAlignment="Center"/>
           <Border Background="{StaticResource SuccessBgBrush}" CornerRadius="12" Padding="8 4" Margin="8 0 0 0" VerticalAlignment="Center">
@@ -55,28 +54,36 @@
               <StackPanel Spacing="16">
                 <TextBlock Text="单字输入源" FontSize="16" FontWeight="Bold" Foreground="{StaticResource OnSurfaceBrush}"/>
                 
-                <!-- Tab Switching Panel -->
-                <Grid ColumnDefinitions="*, *">
-                  <Button Grid.Column="0" Content="图片上传" 
-                          Click="OnUploadTabClick"
-                          Background="{Binding UploadTabBackground}"
-                          Foreground="{Binding UploadTabForeground}"
-                          HorizontalAlignment="Stretch" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
-                  <Button Grid.Column="1" Content="手写输入" 
-                          Click="OnHandwritingTabClick"
-                          Background="{Binding HandwritingTabBackground}"
-                          Foreground="{Binding HandwritingTabForeground}"
-                          HorizontalAlignment="Stretch" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
-                </Grid>
+                <!-- Tab Switching Panel (Segmented Control style) -->
+                <Border Background="{StaticResource SurfaceContainerBrush}" CornerRadius="8" Padding="4">
+                  <Grid ColumnDefinitions="*, *">
+                    <Button Grid.Column="0" Content="图片上传" 
+                            Click="OnUploadTabClick"
+                            Background="{Binding UploadTabBackground}"
+                            Foreground="{Binding UploadTabForeground}"
+                            BorderThickness="0"
+                            CornerRadius="6"
+                            Height="36"
+                            HorizontalAlignment="Stretch" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                    <Button Grid.Column="1" Content="手写输入" 
+                            Click="OnHandwritingTabClick"
+                            Background="{Binding HandwritingTabBackground}"
+                            Foreground="{Binding HandwritingTabForeground}"
+                            BorderThickness="0"
+                            CornerRadius="6"
+                            Height="36"
+                            HorizontalAlignment="Stretch" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                  </Grid>
+                </Border>
 
                 <!-- TAB 0: File Pick Dropzone -->
-                <Panel IsVisible="{Binding ActiveTab, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}">
+                <Panel IsVisible="{Binding IsUploadTabActive}">
                   <Border Name="DropZoneBorder" Height="240" CornerRadius="8" Background="{StaticResource SurfaceLowBrush}" PointerPressed="OnDropZoneClick" DragDrop.AllowDrop="True">
                     <Grid>
-                      <Rectangle Stroke="{StaticResource OutlineVariantBrush}" StrokeThickness="2" StrokeDashArray="4, 4" RadiusX="8" RadiusY="8"/>
+                      <Rectangle Stroke="{StaticResource OutlineVariantBrush}" StrokeThickness="2" StrokeDashArray="4,4" RadiusX="8" RadiusY="8"/>
                       <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12">
                         <Border Width="56" Height="56" CornerRadius="28" Background="#E3F2FD" HorizontalAlignment="Center">
-                          <iconPacks:PackIconMaterialDesign Kind="Upload" Width="28" Height="28" Foreground="{StaticResource BrandBlueBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <PathIcon Data="M9,16h6v-6h4l-7-7-7,7h4V16z M5,18h14v2H5V18z" Width="28" Height="28" Foreground="{StaticResource BrandBlueBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock Text="拖拽单字图像至此，或点击上传" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource OnSurfaceBrush}" HorizontalAlignment="Center"/>
                         <TextBlock Text="支持 JPG, PNG, HEIC 格式" FontSize="12" Foreground="{StaticResource OnSurfaceVariantBrush}" HorizontalAlignment="Center"/>
@@ -96,27 +103,34 @@
                 </Panel>
 
                 <!-- TAB 1: Handwriting Drawing Canvas -->
-                <Panel IsVisible="{Binding ActiveTab, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=1}">
-                  <Border Height="240" BorderBrush="{StaticResource OutlineVariantBrush}" BorderThickness="1" CornerRadius="8" Background="White" ClipToBounds="True">
-                    <Grid>
-                      <Canvas Name="DrawingCanvas" Background="White" Width="224" Height="224" HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Cross"
-                              PointerPressed="OnCanvasPointerPressed"
-                              PointerMoved="OnCanvasPointerMoved"
-                              PointerReleased="OnCanvasPointerReleased">
-                      </Canvas>
-                      
-                      <!-- Handwriting Helpers Overlay -->
-                      <TextBlock Text="在此手写书写字形" Foreground="{StaticResource OutlineVariantBrush}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0 0 0 12" IsHitTestVisible="False"/>
-                      <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Top" HorizontalAlignment="Right" Margin="8">
-                        <Button Classes="Secondary" Click="OnClearCanvasClick">
-                          <StackPanel Orientation="Horizontal" Spacing="6">
-                            <iconPacks:PackIconMaterialDesign Kind="Delete" Width="14" Height="14" VerticalAlignment="Center"/>
-                            <TextBlock Text="清除画板" FontSize="12" VerticalAlignment="Center"/>
-                          </StackPanel>
-                        </Button>
-                      </StackPanel>
+                <Panel IsVisible="{Binding IsHandwritingTabActive}">
+                  <Grid RowDefinitions="*, Auto" HorizontalAlignment="Center">
+                    <Border Grid.Row="0" Width="224" Height="224" BorderBrush="{StaticResource OutlineBrush}" BorderThickness="2" CornerRadius="8" Background="White" ClipToBounds="True">
+                      <Grid>
+                        <!-- Background Guideline Grid (田字格) -->
+                        <Line StartPoint="0,112" EndPoint="224,112" Stroke="{StaticResource OutlineVariantBrush}" StrokeThickness="1.5" StrokeDashArray="4,4" IsHitTestVisible="False"/>
+                        <Line StartPoint="112,0" EndPoint="112,224" Stroke="{StaticResource OutlineVariantBrush}" StrokeThickness="1.5" StrokeDashArray="4,4" IsHitTestVisible="False"/>
+                        
+                        <!-- Drawing Canvas on top -->
+                        <Canvas Name="DrawingCanvas" Background="Transparent" Width="224" Height="224" Cursor="Cross"
+                                PointerPressed="OnCanvasPointerPressed"
+                                PointerMoved="OnCanvasPointerMoved"
+                                PointerReleased="OnCanvasPointerReleased">
+                        </Canvas>
+                      </Grid>
+                    </Border>
+                    
+                    <!-- Control buttons under the canvas -->
+                    <Grid Grid.Row="1" Width="224" Margin="0 8 0 0" ColumnDefinitions="*, *">
+                      <TextBlock Grid.Column="0" Text="在此手写书写字形" Foreground="{StaticResource OutlineVariantBrush}" FontSize="12" VerticalAlignment="Center"/>
+                      <Button Grid.Column="1" Classes="Secondary" Click="OnClearCanvasClick" HorizontalAlignment="Right" Padding="8 4">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <PathIcon Data="M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2,-0.9 2,-2V7H6V19z M19,4h-3.5l-1,-1h-5l-1,1H5v2h14V4z" Width="12" Height="12" VerticalAlignment="Center"/>
+                          <TextBlock Text="重置" FontSize="11" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Button>
                     </Grid>
-                  </Border>
+                  </Grid>
                 </Panel>
               </StackPanel>
             </Border>
@@ -139,7 +153,7 @@
                       <ProgressBar IsIndeterminate="True" Height="4" Foreground="White" VerticalAlignment="Center"/>
                     </Panel>
                     <Panel Grid.Column="0" IsVisible="{Binding !IsAnalyzing}" Width="20" Height="20" Margin="0 0 10 0">
-                      <iconPacks:PackIconMaterialDesign Kind="AutoAwesome" Width="18" Height="18" Foreground="White" VerticalAlignment="Center"/>
+                      <PathIcon Data="M19,9l1.25-2.75L23,5l-2.75-1.25L19,1l-1.25,2.75L15,5l2.75,1.25L19,9z M11.5,9.5L9,4L6.5,9.5L1,12l5.5,2.5L9,20l2.5-5.5L17,12L11.5,9.5z M19,15l-1.25,2.75L15,19l2.75,1.25L19,22l1.25-2.75L23,19l-2.75-1.25L19,15z" Width="18" Height="18" Foreground="White" VerticalAlignment="Center"/>
                     </Panel>
                     <TextBlock Grid.Column="1" Text="{Binding PredictButtonText}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                   </Grid>
