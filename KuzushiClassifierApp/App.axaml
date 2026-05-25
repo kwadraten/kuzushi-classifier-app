@@ -44,6 +44,7 @@
 
     <Application.Styles>
         <FluentTheme />
+
         <!-- Custom Styles -->
         <Style Selector="Border.Card">
             <Setter Property="Background" Value="White" />
