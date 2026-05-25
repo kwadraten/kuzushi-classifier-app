@@ -21,12 +21,9 @@ public partial class MainView : UserControl
     {
         InitializeComponent();
         
-        var props = System.Linq.Enumerable.Select(typeof(Avalonia.Input.IDataTransfer).GetProperties(), p => p.Name + " (" + p.PropertyType.Name + ")");
-        var itemType = typeof(Avalonia.Input.IDataTransfer).GetProperty("Items").PropertyType;
-        // Let's inspect the element type if it is a collection
-        var elementType = itemType.IsGenericType ? itemType.GetGenericArguments()[0] : typeof(object);
-        var elemProps = System.Linq.Enumerable.Select(elementType.GetProperties(), p => p.Name + " (" + p.PropertyType.Name + ")");
-        throw new Exception("Props: " + string.Join(", ", props) + " | Elem: " + elementType.FullName + " | ElemProps: " + string.Join(", ", elemProps));
+        var props = System.Linq.Enumerable.Select(typeof(Avalonia.Input.DataFormat).GetProperties(), p => p.Name);
+        var fields = System.Linq.Enumerable.Select(typeof(Avalonia.Input.DataFormat).GetFields(), f => f.Name);
+        throw new Exception("DataFormat Props: " + string.Join(", ", props) + " | Fields: " + string.Join(", ", fields));
         
         // Add drag & drop handlers
         // AddHandler(DragDrop.DragOverEvent, DragOverHandler);
