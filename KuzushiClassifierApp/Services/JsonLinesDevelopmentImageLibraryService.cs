@@ -86,6 +86,19 @@ public sealed class JsonLinesDevelopmentImageLibraryService : IImageLibraryServi
             image.Id);
     }
 
+    public async IAsyncEnumerable<(DatasetImage Metadata, KuzushiImage Image)> StreamAllImagesAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var images = await LoadImagesAsync(cancellationToken).ConfigureAwait(false);
+
+        foreach (var image in images)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var kuzushiImage = await LoadImageAsync(image, cancellationToken).ConfigureAwait(false);
+            yield return (image, kuzushiImage);
+        }
+    }
+
     private static string GuessMediaType(string path)
     {
         return Path.GetExtension(path).ToLowerInvariant() switch

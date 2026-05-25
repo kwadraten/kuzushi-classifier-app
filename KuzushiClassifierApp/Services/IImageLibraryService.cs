@@ -10,4 +10,7 @@ public interface IImageLibraryService
     Task<KuzushiImage> LoadImageAsync(
         DatasetImage image,
         CancellationToken cancellationToken = default);
+
+    IAsyncEnumerable<(DatasetImage Metadata, KuzushiImage Image)> StreamAllImagesAsync(
+        CancellationToken cancellationToken = default);
 }

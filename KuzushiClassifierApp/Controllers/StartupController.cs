@@ -78,25 +78,23 @@ public sealed class StartupController(
         IProgress<AssetPreparationProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var embeddings = new List<DatasetImageEmbedding>(images.Count);
+        var totalCount = images.Count;
+        var embeddings = new List<DatasetImageEmbedding>(totalCount);
+        var index = 0;
 
-        for (var index = 0; index < images.Count; index++)
+        await foreach (var (metadata, kuzushiImage) in imageLibraryService
+            .StreamAllImagesAsync(cancellationToken)
+            .ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var image = images[index];
-
             progress?.Report(new AssetPreparationProgress(
                 AssetPreparationStep.CalculatingEmbeddings,
-                $"Calculating embedding {index + 1} of {images.Count}.",
-                images.Count == 0 ? 1 : (double)index / images.Count));
-
-            var imageContent = await imageLibraryService
-                .LoadImageAsync(image, cancellationToken)
-                .ConfigureAwait(false);
+                $"Calculating embedding {index + 1} of {totalCount}.",
+                totalCount == 0 ? 1 : (double)index / totalCount));
 
             var preparedImage = await imagePreprocessingService
-                .PrepareForModelAsync(imageContent, cancellationToken)
+                .PrepareForModelAsync(kuzushiImage, cancellationToken)
                 .ConfigureAwait(false);
 
             var embedding = await imageEmbeddingService
@@ -104,8 +102,10 @@ public sealed class StartupController(
                 .ConfigureAwait(false);
 
             embeddings.Add(new DatasetImageEmbedding(
-                image,
+                metadata,
                 embedding.Vector.ToArray()));
+
+            index++;
         }
 
         progress?.Report(new AssetPreparationProgress(

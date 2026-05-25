@@ -86,13 +86,14 @@ public sealed class HuggingFaceModelAssetService :
             {
                 throw new InvalidOperationException(
                     "Failed to download ONNX model files from HuggingFace. " +
-                    $"Please ensure the dataset repository '{_datasetRepo}' exists and is public. " +
+                    $"Please ensure the model repository '{_modelRepo}' exists and is public. " +
                     $"You can manually place model files in: {modelDirectory}");
             }
         }
 
         var datasetDirectory = _appDataPathProvider.GetDatasetCacheDirectory();
-        var datasetReady = DatasetCacheExists(datasetDirectory);
+        var parquetDir = Path.Combine(datasetDirectory, "data");
+        var datasetReady = ParquetFilesExist(parquetDir);
 
         if (!datasetReady)
         {
@@ -104,13 +105,13 @@ public sealed class HuggingFaceModelAssetService :
             await EnsureDatasetAsync(datasetDirectory, progress, cancellationToken)
                 .ConfigureAwait(false);
 
-            datasetReady = DatasetCacheExists(datasetDirectory);
+            datasetReady = ParquetFilesExist(parquetDir);
 
             if (!datasetReady)
             {
                 throw new InvalidOperationException(
-                    "Failed to prepare dataset. " +
-                    $"Ensure Parquet files with columns 'image', 'char', 'unicode' exist in: {datasetDirectory}");
+                    "Failed to download dataset Parquet files. " +
+                    $"Ensure the dataset repository '{_datasetRepo}' is public.");
             }
         }
 
@@ -183,7 +184,6 @@ public sealed class HuggingFaceModelAssetService :
     {
         Directory.CreateDirectory(datasetDirectory);
 
-        var cacheDir = Path.Combine(datasetDirectory, "cache");
         var parquetDir = Path.Combine(datasetDirectory, "data");
 
         var localParquetFiles = Directory.Exists(parquetDir)
@@ -235,100 +235,7 @@ public sealed class HuggingFaceModelAssetService :
                     .WriteAllBytesAsync(filePath, bytes, cancellationToken)
                     .ConfigureAwait(false);
             }
-
-            localParquetFiles = Directory.EnumerateFiles(parquetDir, "*.parquet")
-                .OrderBy(f => f).ToArray();
         }
-
-        var totalParquetRows = await CountParquetRowsAsync(
-            localParquetFiles, cancellationToken).ConfigureAwait(false);
-
-        var cachedRowCount = CountCachedRows(cacheDir);
-
-        if (cachedRowCount > 0 && cachedRowCount >= totalParquetRows)
-        {
-            return;
-        }
-
-        if (cachedRowCount > 0)
-        {
-            progress?.Report(new AssetPreparationProgress(
-                AssetPreparationStep.DownloadingDataset,
-                $"Image cache is stale ({cachedRowCount} entries, {totalParquetRows} in Parquet). Rebuilding.",
-                0.1));
-
-            var staleMetadata = Path.Combine(cacheDir, "metadata.jsonl");
-            var staleImages = Path.Combine(cacheDir, "images");
-            if (File.Exists(staleMetadata)) File.Delete(staleMetadata);
-            if (Directory.Exists(staleImages)) Directory.Delete(staleImages, recursive: true);
-        }
-
-        progress?.Report(new AssetPreparationProgress(
-            AssetPreparationStep.DownloadingDataset,
-            $"Expanding {totalParquetRows} images from {localParquetFiles.Length} Parquet files.",
-            0.2));
-
-        await ExpandParquetToImageCacheAsync(
-            localParquetFiles, cacheDir, progress, cancellationToken).ConfigureAwait(false);
-
-        if (!DatasetCacheExists(datasetDirectory))
-        {
-            throw new InvalidOperationException(
-                "Failed to expand Parquet files to image cache. " +
-                $"Check that Parquet files in '{parquetDir}' contain 'image', 'char', 'unicode' columns.");
-        }
-    }
-
-    private static int CountCachedRows(string cacheDir)
-    {
-        var metadataPath = Path.Combine(cacheDir, "metadata.jsonl");
-        if (!File.Exists(metadataPath))
-        {
-            return 0;
-        }
-
-        var lines = 0;
-        foreach (var line in File.ReadLines(metadataPath))
-        {
-            if (!string.IsNullOrWhiteSpace(line))
-            {
-                lines++;
-            }
-        }
-
-        return lines;
-    }
-
-    private static async Task<int> CountParquetRowsAsync(
-        string[] parquetFiles,
-        CancellationToken cancellationToken)
-    {
-        var total = 0L;
-
-        foreach (var file in parquetFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                await using var fs = File.OpenRead(file);
-                using var reader = await Parquet.ParquetReader
-                    .CreateAsync(fs, cancellationToken: cancellationToken)
-                    .ConfigureAwait(false);
-
-                for (var rgi = 0; rgi < reader.RowGroupCount; rgi++)
-                {
-                    using var rowGroupReader = reader.OpenRowGroupReader(rgi);
-                    total += rowGroupReader.RowCount;
-                }
-            }
-            catch
-            {
-                // Skip unreadable parquet files
-            }
-        }
-
-        return (int)total;
     }
 
     private async Task<string[]> ListParquetFilesAsync(CancellationToken cancellationToken)
@@ -378,162 +285,10 @@ public sealed class HuggingFaceModelAssetService :
         };
     }
 
-    private async Task<bool> ExpandParquetToImageCacheAsync(
-        string[] parquetFiles,
-        string cacheDir,
-        IProgress<AssetPreparationProgress>? progress,
-        CancellationToken cancellationToken)
+    private static bool ParquetFilesExist(string parquetDir)
     {
-        if (parquetFiles.Length == 0)
-        {
-            return false;
-        }
-
-        var metadataPath = Path.Combine(cacheDir, "metadata.jsonl");
-        var imagesDir = Path.Combine(cacheDir, "images");
-
-        Directory.CreateDirectory(cacheDir);
-        Directory.CreateDirectory(imagesDir);
-
-        var imageIndex = 0;
-
-        await using var writer = new StreamWriter(metadataPath, append: false);
-
-        for (var fileIndex = 0; fileIndex < parquetFiles.Length; fileIndex++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var parquetFile = parquetFiles[fileIndex];
-
-            progress?.Report(new AssetPreparationProgress(
-                AssetPreparationStep.DownloadingDataset,
-                $"Expanding Parquet file {fileIndex + 1} of {parquetFiles.Length}...",
-                (double)fileIndex / parquetFiles.Length));
-
-            await foreach (var row in ReadParquetRowsAsync(parquetFile, cancellationToken)
-                .ConfigureAwait(false))
-            {
-                if (row.Bytes is null || row.Bytes.Length == 0)
-                {
-                    continue;
-                }
-
-                var imageId = $"img_{imageIndex:D6}";
-                var imagePath = Path.Combine(imagesDir, $"{imageId}.png");
-
-                await File.WriteAllBytesAsync(imagePath, row.Bytes, cancellationToken)
-                    .ConfigureAwait(false);
-
-                await writer.WriteLineAsync(JsonSerializer.Serialize(
-                    new
-                    {
-                        Id = imageId,
-                        Label = row.Label ?? "",
-                        Unicode = row.Unicode ?? "",
-                        LocalPath = $"images/{imageId}.png",
-                    },
-                    JsonSerializerOptions.Web)).ConfigureAwait(false);
-
-                imageIndex++;
-            }
-        }
-
-        return imageIndex > 0;
-    }
-
-    private sealed record ParquetRow(string? Label, string? Unicode, byte[]? Bytes);
-
-    private static async IAsyncEnumerable<ParquetRow> ReadParquetRowsAsync(
-        string parquetPath,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        await using var fs = File.OpenRead(parquetPath);
-        using var reader = await Parquet.ParquetReader.CreateAsync(fs, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        var dataFields = reader.Schema.GetDataFields();
-
-        var imageField = dataFields.FirstOrDefault(f =>
-            f.Name.Equals("image", StringComparison.OrdinalIgnoreCase));
-        var charField = dataFields.FirstOrDefault(f =>
-            f.Name.Equals("char", StringComparison.OrdinalIgnoreCase));
-        var unicodeField = dataFields.FirstOrDefault(f =>
-            f.Name.Equals("unicode", StringComparison.OrdinalIgnoreCase));
-
-        if (imageField is null || charField is null)
-        {
-            yield break;
-        }
-
-        for (var rgi = 0; rgi < reader.RowGroupCount; rgi++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            using var rowGroupReader = reader.OpenRowGroupReader(rgi);
-
-            var imageColumn = await rowGroupReader
-                .ReadColumnAsync(imageField, cancellationToken)
-                .ConfigureAwait(false);
-
-            var charColumn = await rowGroupReader
-                .ReadColumnAsync(charField, cancellationToken)
-                .ConfigureAwait(false);
-
-            string[]? unicodeValues = null;
-            if (unicodeField is not null)
-            {
-                var unicodeColumn = await rowGroupReader
-                    .ReadColumnAsync(unicodeField, cancellationToken)
-                    .ConfigureAwait(false);
-                unicodeValues = (string[])unicodeColumn.Data;
-            }
-
-            var charValues = (string[])charColumn.Data;
-
-            var imageData = imageColumn.Data;
-            byte[][] imageBytes;
-
-            if (imageData is byte[][] directBytes)
-            {
-                imageBytes = directBytes;
-            }
-            else if (imageData is Array rowArray && rowArray.Length > 0)
-            {
-                imageBytes = new byte[rowArray.Length][];
-                for (var r = 0; r < rowArray.Length; r++)
-                {
-                    var element = rowArray.GetValue(r);
-                    if (element is byte[] elementBytes)
-                    {
-                        imageBytes[r] = elementBytes;
-                    }
-                    else if (element is object[] nestedValues && nestedValues.Length > 0
-                        && nestedValues[0] is byte[] nestedBytes)
-                    {
-                        // Struct type: first field is bytes
-                        imageBytes[r] = nestedBytes;
-                    }
-                    else
-                    {
-                        imageBytes[r] = Array.Empty<byte>();
-                    }
-                }
-            }
-            else
-            {
-                imageBytes = Array.Empty<byte[]>();
-            }
-
-            var rowCount = charValues.Length;
-
-            for (var row = 0; row < rowCount; row++)
-            {
-                yield return new ParquetRow(
-                    charValues[row],
-                    unicodeValues?[row],
-                    row < imageBytes.Length ? imageBytes[row] : null);
-            }
-        }
+        return Directory.Exists(parquetDir)
+            && Directory.EnumerateFiles(parquetDir, "*.parquet").Any();
     }
 
     private static bool ModelFilesReady(string modelDirectory, string baseName)
@@ -542,27 +297,5 @@ public sealed class HuggingFaceModelAssetService :
         var metadataPath = Path.Combine(modelDirectory, $"{baseName}.metadata.json");
 
         return File.Exists(onnxPath) && File.Exists(metadataPath);
-    }
-
-    private static bool DatasetCacheExists(string datasetDirectory)
-    {
-        if (!Directory.Exists(datasetDirectory))
-        {
-            return false;
-        }
-
-        var metadataPath = Path.Combine(datasetDirectory, "cache", "metadata.jsonl");
-        if (!File.Exists(metadataPath))
-        {
-            return false;
-        }
-
-        var imagesDir = Path.Combine(datasetDirectory, "cache", "images");
-        if (!Directory.Exists(imagesDir))
-        {
-            return false;
-        }
-
-        return Directory.EnumerateFiles(imagesDir).Any();
     }
 }
