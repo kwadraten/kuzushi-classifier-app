@@ -33,15 +33,13 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
                 ItemsProcessed: images.Count));
 
             await using var fs = File.OpenRead(file);
-            using var reader = await Parquet.ParquetReader
+            await using var reader = await Parquet.ParquetReader
                 .CreateAsync(fs, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             var dataFields = reader.Schema.GetDataFields();
             var charField = dataFields.FirstOrDefault(f =>
                 f.Name.Equals("char", StringComparison.OrdinalIgnoreCase));
-            var unicodeField = dataFields.FirstOrDefault(f =>
-                f.Name.Equals("unicode", StringComparison.OrdinalIgnoreCase));
 
             if (charField is null)
             {
@@ -53,20 +51,20 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
                 cancellationToken.ThrowIfCancellationRequested();
 
                 using var rowGroupReader = reader.OpenRowGroupReader(rgi);
+                var rowCount = (int)rowGroupReader.RowCount;
 
-                var charColumn = await rowGroupReader
-                    .ReadColumnAsync(charField, cancellationToken)
+                var charValues = new string?[rowCount];
+                await rowGroupReader
+                    .ReadAsync(charField, charValues.AsMemory(), null, cancellationToken)
                     .ConfigureAwait(false);
 
-                var charValues = (string[])charColumn.Data;
-
-                for (var row = 0; row < charValues.Length; row++)
+                for (var row = 0; row < rowCount; row++)
                 {
                     var globalIndex = images.Count;
 
                     images.Add(new DatasetImage(
                         Id: $"parq_{globalIndex:D6}",
-                        Label: charValues[row],
+                        Label: charValues[row] ?? "",
                         SourceUri: null,
                         LocalPath: $"{file}::{rgi}::{row}"));
                 }
@@ -105,13 +103,15 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
             cancellationToken.ThrowIfCancellationRequested();
 
             await using var fs = File.OpenRead(file);
-            using var reader = await Parquet.ParquetReader
+            await using var reader = await Parquet.ParquetReader
                 .CreateAsync(fs, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             var dataFields = reader.Schema.GetDataFields();
             var imageField = dataFields.FirstOrDefault(f =>
-                f.Name.Equals("image", StringComparison.OrdinalIgnoreCase));
+                f.Name.Equals("image", StringComparison.OrdinalIgnoreCase))
+                ?? dataFields.FirstOrDefault(f =>
+                f.Name.Equals("bytes", StringComparison.OrdinalIgnoreCase));
             var charField = dataFields.FirstOrDefault(f =>
                 f.Name.Equals("char", StringComparison.OrdinalIgnoreCase));
 
@@ -125,28 +125,27 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
                 cancellationToken.ThrowIfCancellationRequested();
 
                 using var rowGroupReader = reader.OpenRowGroupReader(rgi);
+                var rowCount = (int)rowGroupReader.RowCount;
 
-                var imageColumn = await rowGroupReader
-                    .ReadColumnAsync(imageField, cancellationToken)
+                var imageBytes = new byte[]?[rowCount];
+                await rowGroupReader
+                    .ReadAsync(imageField, imageBytes.AsMemory(), null, cancellationToken)
                     .ConfigureAwait(false);
 
-                var charColumn = await rowGroupReader
-                    .ReadColumnAsync(charField, cancellationToken)
+                var charValues = new string?[rowCount];
+                await rowGroupReader
+                    .ReadAsync(charField, charValues.AsMemory(), null, cancellationToken)
                     .ConfigureAwait(false);
-
-                var charValues = (string[])charColumn.Data;
-                var imageBytes = ExtractImageBytes(imageColumn.Data);
-                var rowCount = charValues.Length;
 
                 for (var row = 0; row < rowCount; row++)
                 {
                     var metadata = new DatasetImage(
                         Id: $"parq_{globalIndex:D6}",
-                        Label: charValues[row],
+                        Label: charValues[row] ?? "",
                         SourceUri: null,
                         LocalPath: $"{file}::{rgi}::{row}");
 
-                    var bytes = row < imageBytes.Length ? imageBytes[row] : null;
+                    var bytes = imageBytes[row];
                     if (bytes is null || bytes.Length == 0)
                     {
                         globalIndex++;
@@ -176,42 +175,6 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
             .ToArray();
     }
 
-    private static byte[][] ExtractImageBytes(Array imageData)
-    {
-        if (imageData is byte[][] directBytes)
-        {
-            return directBytes;
-        }
-
-        if (imageData is Array rowArray && rowArray.Length > 0)
-        {
-            var result = new byte[rowArray.Length][];
-
-            for (var r = 0; r < rowArray.Length; r++)
-            {
-                var element = rowArray.GetValue(r);
-
-                if (element is byte[] elementBytes)
-                {
-                    result[r] = elementBytes;
-                }
-                else if (element is object[] nestedValues && nestedValues.Length > 0
-                    && nestedValues[0] is byte[] nestedBytes)
-                {
-                    result[r] = nestedBytes;
-                }
-                else
-                {
-                    result[r] = Array.Empty<byte>();
-                }
-            }
-
-            return result;
-        }
-
-        return Array.Empty<byte[]>();
-    }
-
     private static (string File, int RowGroup, int Row)? ParseLocalPath(string? localPath)
     {
         if (string.IsNullOrEmpty(localPath))
@@ -237,13 +200,15 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
         string filePath, int rowGroup, int row, CancellationToken cancellationToken)
     {
         await using var fs = File.OpenRead(filePath);
-        using var reader = await Parquet.ParquetReader
+        await using var reader = await Parquet.ParquetReader
             .CreateAsync(fs, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         var dataFields = reader.Schema.GetDataFields();
         var imageField = dataFields.FirstOrDefault(f =>
-            f.Name.Equals("image", StringComparison.OrdinalIgnoreCase));
+            f.Name.Equals("image", StringComparison.OrdinalIgnoreCase))
+            ?? dataFields.FirstOrDefault(f =>
+            f.Name.Equals("bytes", StringComparison.OrdinalIgnoreCase));
 
         if (imageField is null)
         {
@@ -251,12 +216,13 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
         }
 
         using var rowGroupReader = reader.OpenRowGroupReader(rowGroup);
-        var imageColumn = await rowGroupReader
-            .ReadColumnAsync(imageField, cancellationToken)
+        var rowCount = (int)rowGroupReader.RowCount;
+
+        var imageBytes = new byte[]?[rowCount];
+        await rowGroupReader
+            .ReadAsync(imageField, imageBytes.AsMemory(), null, cancellationToken)
             .ConfigureAwait(false);
 
-        var imageBytes = ExtractImageBytes(imageColumn.Data);
-
-        return row < imageBytes.Length ? imageBytes[row] : Array.Empty<byte>();
+        return row < imageBytes.Length ? (imageBytes[row] ?? Array.Empty<byte>()) : Array.Empty<byte>();
     }
 }
