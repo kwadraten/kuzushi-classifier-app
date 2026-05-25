@@ -52,6 +52,12 @@ public partial class MainViewModel : ViewModelBase
     private int _activeTab; // 0 = File Upload, 1 = Handwriting Canvas
 
     [ObservableProperty]
+    private bool _isUploadTabActive = true;
+
+    [ObservableProperty]
+    private bool _isHandwritingTabActive;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsImageSelected))]
     private string? _selectedImagePath;
 
@@ -83,6 +89,12 @@ public partial class MainViewModel : ViewModelBase
     public IBrush HandwritingTabForeground => ActiveTab == 1 ? SolidColorBrush.Parse("#005FAA") : SolidColorBrush.Parse("#404752");
 
     public string PredictButtonText => IsAnalyzing ? "正在分析预测..." : "开始识别预测";
+
+    partial void OnActiveTabChanged(int value)
+    {
+        IsUploadTabActive = value == 0;
+        IsHandwritingTabActive = value == 1;
+    }
 
     public ObservableCollection<PredictionCandidate> PredictionCandidates { get; } = new();
 
