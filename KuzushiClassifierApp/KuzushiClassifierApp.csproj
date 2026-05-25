@@ -22,5 +22,6 @@
 
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
     <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="Parquet.Net" />
   </ItemGroup>
 </Project>
