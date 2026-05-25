@@ -29,7 +29,7 @@ public sealed class JsonLinesDevelopmentImageLibraryService : IImageLibraryServi
         if (!File.Exists(_metadataPath))
         {
             throw new FileNotFoundException(
-                "Development dataset cache is missing. Run .agents/tools/build_dev_dataset_cache.py first.",
+                "Development dataset cache is missing. It will be built automatically from Parquet files on first run.",
                 _metadataPath);
         }
 
