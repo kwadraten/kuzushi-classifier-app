@@ -21,19 +21,15 @@ public partial class MainView : UserControl
     {
         InitializeComponent();
         
-        var props = System.Linq.Enumerable.Select(typeof(Avalonia.Input.DataFormat).GetProperties(), p => p.Name);
-        var fields = System.Linq.Enumerable.Select(typeof(Avalonia.Input.DataFormat).GetFields(), f => f.Name);
-        throw new Exception("DataFormat Props: " + string.Join(", ", props) + " | Fields: " + string.Join(", ", fields));
-        
         // Add drag & drop handlers
-        // AddHandler(DragDrop.DragOverEvent, DragOverHandler);
-        // AddHandler(DragDrop.DropEvent, DropHandler);
+        AddHandler(DragDrop.DragOverEvent, DragOverHandler);
+        AddHandler(DragDrop.DropEvent, DropHandler);
     }
 
     private void DragOverHandler(object? sender, DragEventArgs e)
     {
-        /*
-        if (e.Data.Contains(DataFormats.Files))
+        var hasFiles = System.Linq.Enumerable.Any(e.DataTransfer.Items, i => i.Formats.Contains(DataFormat.File));
+        if (hasFiles)
         {
             e.DragEffects = DragDropEffects.Copy;
         }
@@ -41,25 +37,39 @@ public partial class MainView : UserControl
         {
             e.DragEffects = DragDropEffects.None;
         }
-        */
     }
 
     private async void DropHandler(object? sender, DragEventArgs e)
     {
-        /*
-        if (e.Data.Contains(DataFormats.Files))
+        var fileItem = System.Linq.Enumerable.FirstOrDefault(e.DataTransfer.Items, i => i.Formats.Contains(DataFormat.File));
+        if (fileItem != null)
         {
-            var files = e.Data.GetFiles();
-            if (files != null && System.Linq.Enumerable.Any(files))
+            var rawValue = fileItem.TryGetRaw(DataFormat.File);
+            if (rawValue is System.Collections.Generic.IEnumerable<IStorageItem> storageItems && System.Linq.Enumerable.Any(storageItems))
             {
-                var localPath = System.Linq.Enumerable.First(files).Path.LocalPath;
+                var localPath = System.Linq.Enumerable.First(storageItems).Path.LocalPath;
+                if (DataContext is MainViewModel vm)
+                {
+                    await vm.SelectImageAsync(localPath);
+                }
+            }
+            else if (rawValue is IStorageItem singleItem)
+            {
+                var localPath = singleItem.Path.LocalPath;
+                if (DataContext is MainViewModel vm)
+                {
+                    await vm.SelectImageAsync(localPath);
+                }
+            }
+            else if (rawValue is System.Collections.Generic.IEnumerable<string> paths && System.Linq.Enumerable.Any(paths))
+            {
+                var localPath = System.Linq.Enumerable.First(paths);
                 if (DataContext is MainViewModel vm)
                 {
                     await vm.SelectImageAsync(localPath);
                 }
             }
         }
-        */
     }
 
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
