@@ -3,7 +3,7 @@ using KuzushiClassifierApp.Platform;
 
 namespace KuzushiClassifierApp.Services;
 
-public sealed record LocalDevelopmentBusinessServices(
+public sealed record BusinessServices(
     IAppDataPathProvider AppDataPathProvider,
     IModelPathProvider ModelPathProvider,
     IModelAssetService ModelAssetService,
@@ -18,10 +18,10 @@ public sealed record LocalDevelopmentBusinessServices(
     SimilaritySearchController SimilaritySearchController,
     ImageAnalysisController ImageAnalysisController)
 {
-    public static LocalDevelopmentBusinessServices Create(string? startDirectory = null)
+    public static BusinessServices Create(string? startDirectory = null)
     {
-        var appDataPathProvider = new LocalDevelopmentAppDataPathProvider(startDirectory);
-        var modelAssetService = new LocalDevelopmentModelAssetService(appDataPathProvider);
+        var appDataPathProvider = new AppDataPathProvider(startDirectory);
+        var modelAssetService = new HuggingFaceModelAssetService(appDataPathProvider);
         var imageLibraryService = new JsonLinesDevelopmentImageLibraryService(appDataPathProvider);
         var imagePreprocessingService = new PassThroughImagePreprocessingService();
         var imageClassifierService = new OnnxImageClassifierService(modelAssetService);
@@ -50,7 +50,7 @@ public sealed record LocalDevelopmentBusinessServices(
             classificationController,
             similaritySearchController);
 
-        return new LocalDevelopmentBusinessServices(
+        return new BusinessServices(
             appDataPathProvider,
             modelAssetService,
             modelAssetService,

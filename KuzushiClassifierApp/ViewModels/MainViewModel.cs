@@ -116,7 +116,7 @@ public partial class MainViewModel : ViewModelBase
         _ = InitializeAppAsync();
     }
 
-    private static readonly LocalDevelopmentBusinessServices DevServices = LocalDevelopmentBusinessServices.Create();
+    private static readonly BusinessServices DevServices = BusinessServices.Create();
 
     /// <summary>
     /// Parameterless constructor for XAML designer and standalone UI testing
