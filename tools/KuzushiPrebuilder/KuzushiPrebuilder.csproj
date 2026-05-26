@@ -11,5 +11,6 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
     <PackageReference Include="Parquet.Net" />
     <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="Spectre.Console" />
   </ItemGroup>
 </Project>
