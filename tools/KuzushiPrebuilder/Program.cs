@@ -83,11 +83,6 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
         Directory.CreateDirectory(options.VectorDirectory);
         Directory.CreateDirectory(options.ModelDirectory);
         Directory.CreateDirectory(options.DatasetShardDirectory);
-
-        if (File.Exists(options.RecordsPath))
-        {
-            File.Delete(options.RecordsPath);
-        }
     }
 
     private async Task<string[]> DownloadStageAsync()
@@ -231,6 +226,17 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
 
     private async Task CompressStageAsync(string[] shardPaths, int targetCount)
     {
+        if (!options.Force && TryLoadCompleteCompressedRecords(targetCount, out var existingRecords))
+        {
+            Console.WriteLine($"跳过压缩：已存在 {existingRecords.Length:N0} 条 metadata，图片文件完整。");
+            return;
+        }
+
+        if (File.Exists(options.RecordsPath))
+        {
+            File.Delete(options.RecordsPath);
+        }
+
         var completed = 0;
         var accepted = 0;
         var writerLock = new object();
@@ -339,6 +345,26 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
         var compressedWidth = image.Width;
         var compressedHeight = image.Height;
 
+        if (!options.Force && FileReady(absolutePath))
+        {
+            if (TryIdentifyImage(absolutePath, out var existingWidth, out var existingHeight))
+            {
+                return new CompressedRecord(
+                    id,
+                    label,
+                    relativePath,
+                    Path.GetFileName(shardPath),
+                    rowGroupIndex,
+                    row,
+                    image.Width,
+                    image.Height,
+                    existingWidth,
+                    existingHeight);
+            }
+
+            File.Delete(absolutePath);
+        }
+
         using var outputImage = image.Clone(context =>
         {
             if (image.Width > options.MaxWidth)
@@ -367,6 +393,11 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
 
     private CompressedRecord[] LoadCompressedRecords()
     {
+        if (!File.Exists(options.RecordsPath))
+        {
+            throw new FileNotFoundException("Compressed metadata file was not found.", options.RecordsPath);
+        }
+
         return File.ReadLines(options.RecordsPath)
             .Select(line => JsonSerializer.Deserialize<CompressedRecord>(line, WebJson))
             .Where(record => record is not null)
@@ -377,6 +408,12 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
 
     private async Task EmbedAndIndexStageAsync(EmbeddingMetadata metadata, CompressedRecord[] records)
     {
+        if (!options.Force && IsExistingVectorIndexComplete(records.Length))
+        {
+            Console.WriteLine($"跳过嵌入：DotVector 索引已存在，manifest 记录数为 {records.Length:N0}。");
+            return;
+        }
+
         if (Directory.Exists(options.VectorDirectory))
         {
             Directory.Delete(options.VectorDirectory, recursive: true);
@@ -587,6 +624,65 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
             }));
     }
 
+    private bool TryLoadCompleteCompressedRecords(int targetCount, out CompressedRecord[] records)
+    {
+        records = [];
+
+        if (!File.Exists(options.RecordsPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            records = LoadCompressedRecords();
+        }
+        catch
+        {
+            records = [];
+            return false;
+        }
+
+        if (records.Length != targetCount)
+        {
+            return false;
+        }
+
+        return records.All(record =>
+        {
+            var imagePath = Path.Combine(options.OutputRoot, record.ImageFile.Replace('/', Path.DirectorySeparatorChar));
+            return FileReady(imagePath) && TryIdentifyImage(imagePath, out _, out _);
+        });
+    }
+
+    private bool IsExistingVectorIndexComplete(int expectedRecordCount)
+    {
+        if (!File.Exists(options.ManifestPath) || !Directory.Exists(options.VectorDirectory))
+        {
+            return false;
+        }
+
+        if (!Directory.EnumerateFiles(options.VectorDirectory, "*", SearchOption.AllDirectories).Any())
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(options.ManifestPath));
+            if (!doc.RootElement.TryGetProperty("recordCount", out var recordCount))
+            {
+                return false;
+            }
+
+            return recordCount.GetInt32() == expectedRecordCount;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private void CreateTarPackage()
     {
         if (File.Exists(options.TarPath))
@@ -690,6 +786,23 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
 
     private static bool FileReady(string path) =>
         File.Exists(path) && new FileInfo(path).Length > 0;
+
+    private static bool TryIdentifyImage(string path, out int width, out int height)
+    {
+        try
+        {
+            var info = Image.Identify(path);
+            width = info.Width;
+            height = info.Height;
+            return true;
+        }
+        catch
+        {
+            width = 0;
+            height = 0;
+            return false;
+        }
+    }
 
     private static float[] Normalize(float[] vector)
     {
