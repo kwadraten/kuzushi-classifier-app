@@ -455,3 +455,5 @@ $RECYCLE.BIN/
 
 # Local development data, generated caches, and large model artifacts
 .agents/dev_data/
+tools/KuzushiPrebuilder/output/
+tools/KuzushiPrebuilder/*.tar

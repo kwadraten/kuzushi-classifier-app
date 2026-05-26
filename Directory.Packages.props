@@ -14,6 +14,7 @@
     <PackageVersion Include="Avalonia.Android" Version="12.0.3" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
 
+    <PackageVersion Include="DotVector.Core" Version="1.0.0" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.26.0" />
     <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
     <PackageVersion Include="Parquet.Net" Version="6.0.3" />
