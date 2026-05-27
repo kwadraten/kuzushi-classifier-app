@@ -19,5 +19,9 @@
     <PackageVersion Include="Parquet.Net" Version="6.0.3" />
     <PackageVersion Include="Spectre.Console" Version="0.50.0" />
     <PackageVersion Include="Xamarin.AndroidX.Core.SplashScreen" Version="1.0.1.15" />
+    
+    <!-- Logging dependencies -->
+    <PackageVersion Include="ZLogger" Version="2.5.4" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.0" />
   </ItemGroup>
 </Project>

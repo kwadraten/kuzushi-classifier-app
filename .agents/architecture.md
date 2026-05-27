@@ -177,3 +177,9 @@ Downloaded HuggingFace Parquet shards used by `tools/KuzushiPrebuilder` live und
 ```
 
 `tools/KuzushiPrebuilder` writes publishable prebuilt package artifacts under `.agents/dev_data/prebuilt/`, but those artifacts are inputs for upload or release packaging, not an app-local shortcut.
+
+## Logging & Error Handling Guidelines
+
+- **Do Not Hide Errors Silently**: Under no circumstances should exceptions be caught and silently swallowed without diagnostics.
+- **Explicit Logging via ZLogger**: Every catch block in controllers, services, and viewmodels must explicitly record the error details using `ZLogger` (such as `_logger.ZLogError` or `_logger.ZLogWarning`) to ensure high-performance, AOT-safe, structured diagnostics.
+

@@ -11,6 +11,8 @@ using CommunityToolkit.Mvvm.Input;
 using KuzushiClassifierApp.Controllers;
 using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Services;
+using Microsoft.Extensions.Logging;
+using ZLogger;
 
 namespace KuzushiClassifierApp.ViewModels;
 
@@ -18,9 +20,12 @@ public partial class MainViewModel : ViewModelBase
 {
     private readonly StartupController _startupController;
     private readonly ImageAnalysisController _imageAnalysisController;
+    private readonly ILogger<MainViewModel> _logger;
     private CancellationTokenSource? _startupCts;
     private CancellationTokenSource? _analysisCts;
     private byte[]? _selectedImageBytes;
+
+    public ILogger<MainViewModel> Logger => _logger;
 
     // --- Observable Properties ---
 
@@ -107,10 +112,12 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public MainViewModel(
         StartupController startupController,
-        ImageAnalysisController imageAnalysisController)
+        ImageAnalysisController imageAnalysisController,
+        ILogger<MainViewModel> logger)
     {
         _startupController = startupController;
         _imageAnalysisController = imageAnalysisController;
+        _logger = logger;
         
         // Auto start app initialization
         _ = InitializeAppAsync();
@@ -122,7 +129,10 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// Parameterless constructor for XAML designer and standalone UI testing
     /// </summary>
-    public MainViewModel() : this(DevServices.StartupController, DevServices.ImageAnalysisController)
+    public MainViewModel() : this(
+        DevServices.StartupController,
+        DevServices.ImageAnalysisController,
+        DevServices.LoggerFactory.CreateLogger<MainViewModel>())
     {
     }
 
@@ -166,12 +176,14 @@ public partial class MainViewModel : ViewModelBase
             StartupProgressFraction = 1.0;
             IsInitialized = true;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            _logger.ZLogInformation(ex, $"App initialization was canceled.");
             StartupStatusText = "初始化已被取消。";
         }
         catch (Exception ex)
         {
+            _logger.ZLogError(ex, $"App initialization failed.");
             StartupStatusText = $"初始化失败: {ex.Message}";
         }
     }
@@ -193,6 +205,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            _logger.ZLogError(ex, $"Failed to load image from path: {path}");
             StartupStatusText = $"加载图片失败: {ex.Message}";
         }
     }
@@ -266,7 +279,7 @@ public partial class MainViewModel : ViewModelBase
                 Avalonia.Threading.Dispatcher.UIThread.Post(() => SimilarImages.Add(uiModel));
                 
                 // Triggers async loading of the image thumbnail in the background
-                await uiModel.LoadImageAsync(ResolvedImageLibraryService, _analysisCts.Token).ConfigureAwait(false);
+                await uiModel.LoadImageAsync(ResolvedImageLibraryService, _logger, _analysisCts.Token).ConfigureAwait(false);
             });
 
             await Task.WhenAll(loadTasks);
@@ -274,12 +287,14 @@ public partial class MainViewModel : ViewModelBase
             HasResults = true;
             AnalysisProgressText = "分析完成。";
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            _logger.ZLogInformation(ex, $"Image analysis was canceled.");
             AnalysisProgressText = "分析已取消。";
         }
         catch (Exception ex)
         {
+            _logger.ZLogError(ex, $"Image analysis failed.");
             AnalysisProgressText = $"分析失败: {ex.Message}";
         }
         finally

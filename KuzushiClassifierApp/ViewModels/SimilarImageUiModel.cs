@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.Extensions.Logging;
+using ZLogger;
 
 namespace KuzushiClassifierApp.ViewModels;
 
@@ -32,7 +34,10 @@ public sealed partial class SimilarImageUiModel : ObservableObject
         LocalPath = localPath;
     }
 
-    public async Task LoadImageAsync(KuzushiClassifierApp.Services.IImageLibraryService? libraryService, CancellationToken cancellationToken = default)
+    public async Task LoadImageAsync(
+        KuzushiClassifierApp.Services.IImageLibraryService? libraryService,
+        ILogger? logger = null,
+        CancellationToken cancellationToken = default)
     {
         IsLoadingImage = true;
         try
@@ -77,8 +82,9 @@ public sealed partial class SimilarImageUiModel : ObservableObject
                 IsLoadingImage = false;
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            logger?.ZLogError(ex, $"Failed to load similar image thumbnail. LocalPath: {LocalPath}, SourceUri: {SourceUri}");
             IsLoadingImage = false;
             // Fallback: stay as null so the UI shows placeholder
         }

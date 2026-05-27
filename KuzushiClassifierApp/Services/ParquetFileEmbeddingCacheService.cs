@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Platform;
+using Microsoft.Extensions.Logging;
+using ZLogger;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
@@ -16,11 +18,16 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
     private const int BatchSize = 2_000;
 
     private readonly string _cacheFilePath;
+    private readonly ILogger<ParquetFileEmbeddingCacheService> _logger;
 
-    public ParquetFileEmbeddingCacheService(IAppDataPathProvider appDataPathProvider)
+    public ParquetFileEmbeddingCacheService(
+        IAppDataPathProvider appDataPathProvider,
+        ILogger<ParquetFileEmbeddingCacheService> logger)
     {
         ArgumentNullException.ThrowIfNull(appDataPathProvider);
+        ArgumentNullException.ThrowIfNull(logger);
 
+        _logger = logger;
         _cacheFilePath = Path.Combine(
             appDataPathProvider.GetDatasetCacheDirectory(),
             CacheFileName);
@@ -57,8 +64,9 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
 
             return new EmbeddingCacheMetadata(count, layout.Dimensions);
         }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.ZLogWarning(ex, $"Failed to read embedding cache metadata from {_cacheFilePath}");
             return null;
         }
     }

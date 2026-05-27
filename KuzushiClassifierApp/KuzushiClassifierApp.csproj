@@ -23,5 +23,9 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
     <PackageReference Include="SixLabors.ImageSharp" />
     <PackageReference Include="Parquet.Net" />
+    
+    <!-- Logging dependencies -->
+    <PackageReference Include="ZLogger" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
 </Project>

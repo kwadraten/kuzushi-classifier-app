@@ -10,6 +10,8 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using KuzushiClassifierApp.ViewModels;
+using Microsoft.Extensions.Logging;
+using ZLogger;
 
 namespace KuzushiClassifierApp.Views;
 
@@ -154,6 +156,7 @@ public partial class MainView : UserControl
             if (DataContext is MainViewModel vm)
             {
                 vm.StartupStatusText = $"打开文件失败: {ex.Message}";
+                vm.Logger.ZLogError(ex, $"Failed to select and load file from file picker.");
             }
         }
     }

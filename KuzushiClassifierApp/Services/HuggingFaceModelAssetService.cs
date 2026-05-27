@@ -5,6 +5,8 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Platform;
+using Microsoft.Extensions.Logging;
+using ZLogger;
 
 namespace KuzushiClassifierApp.Services;
 
@@ -20,16 +22,19 @@ public sealed class HuggingFaceModelAssetService :
         "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/image-embeddings.parquet";
 
     private readonly IAppDataPathProvider _appDataPathProvider;
+    private readonly ILogger<HuggingFaceModelAssetService> _logger;
     private readonly HttpClient _httpClient;
     private readonly string _modelRepo;
     private readonly string _datasetRepo;
 
     public HuggingFaceModelAssetService(
         IAppDataPathProvider appDataPathProvider,
+        ILogger<HuggingFaceModelAssetService> logger,
         string modelRepo = DefaultModelRepo,
         string datasetRepo = DefaultDatasetRepo)
     {
         _appDataPathProvider = appDataPathProvider;
+        _logger = logger;
         _modelRepo = modelRepo;
         _datasetRepo = datasetRepo;
 
@@ -113,8 +118,9 @@ public sealed class HuggingFaceModelAssetService :
                 await EnsurePrebuiltEmbeddingsAsync(datasetDirectory, progress, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
+                _logger.ZLogWarning(ex, $"Could not download prebuilt image embeddings; embeddings will be calculated locally.");
                 progress?.Report(new AssetPreparationProgress(
                     AssetPreparationStep.DownloadingDataset,
                     "Could not download prebuilt image embeddings; embeddings will be calculated locally.",
@@ -202,6 +208,7 @@ public sealed class HuggingFaceModelAssetService :
             }
             catch (HttpRequestException ex)
             {
+                _logger.ZLogError(ex, $"Failed to download model file {fileName} from {url}");
                 throw new InvalidOperationException(
                     $"Failed to download {fileName} from HuggingFace ({url}). " +
                     $"Status: {ex.StatusCode}. Ensure the model repository '{_modelRepo}' is public.",
@@ -291,14 +298,17 @@ public sealed class HuggingFaceModelAssetService :
                 }
             }
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            _logger.ZLogWarning(ex, $"HTTP request failed while listing Parquet files from API: {apiUrl}");
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            _logger.ZLogWarning(ex, $"JSON parsing failed while listing Parquet files from API: {apiUrl}");
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.ZLogWarning(ex, $"Task was canceled while listing Parquet files from API: {apiUrl}");
         }
 
         return DefaultDatasetShardPaths;
@@ -487,15 +497,17 @@ public sealed class HuggingFaceModelAssetService :
                 File.Move(tempPath, filePath, overwrite: true);
                 return;
             }
-            catch (IOException) when (retryCount < maxRetries)
+            catch (IOException ex) when (retryCount < maxRetries)
             {
                 retryCount++;
+                _logger.ZLogWarning(ex, $"IOException during download for {label}. Retrying ({retryCount}/{maxRetries}) after delay...");
                 await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, retryCount * 2)), cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (HttpRequestException) when (retryCount < maxRetries)
+            catch (HttpRequestException ex) when (retryCount < maxRetries)
             {
                 retryCount++;
+                _logger.ZLogWarning(ex, $"HttpRequestException during download for {label}. Retrying ({retryCount}/{maxRetries}) after delay...");
                 await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, retryCount * 2)), cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -518,12 +530,14 @@ public sealed class HuggingFaceModelAssetService :
                 ? response.Content.Headers.ContentLength
                 : null;
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            _logger.ZLogWarning(ex, $"Failed to get remote content length for {url}");
             return null;
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.ZLogWarning(ex, $"Task canceled while getting remote content length for {url}");
             return null;
         }
     }

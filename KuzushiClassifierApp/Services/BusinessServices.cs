@@ -1,5 +1,10 @@
+using System.IO;
+using System.Linq;
 using KuzushiClassifierApp.Controllers;
 using KuzushiClassifierApp.Platform;
+using Microsoft.Extensions.Logging;
+using ZLogger;
+using ZLogger.Providers;
 
 namespace KuzushiClassifierApp.Services;
 
@@ -16,17 +21,37 @@ public sealed record BusinessServices(
     StartupController StartupController,
     ClassificationController ClassificationController,
     SimilaritySearchController SimilaritySearchController,
-    ImageAnalysisController ImageAnalysisController)
+    ImageAnalysisController ImageAnalysisController,
+    ILoggerFactory LoggerFactory)
 {
     public static BusinessServices Create(string? startDirectory = null)
     {
         var appDataPathProvider = new AppDataPathProvider(startDirectory);
-        var modelAssetService = new HuggingFaceModelAssetService(appDataPathProvider);
+
+        // Configure rolling logging to logs subfolder
+        var logDir = Path.Combine(appDataPathProvider.GetAppDataDirectory(), "logs");
+        Directory.CreateDirectory(logDir);
+        CleanOldLogFiles(logDir, 3);
+
+        var loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddZLoggerConsole();
+            builder.AddZLoggerRollingFile(
+                (dt, index) => Path.Combine(logDir, $"app_{dt:yyyyMMdd}_{index:D3}.log"),
+                RollingInterval.Day
+            );
+        });
+
+        var modelLogger = loggerFactory.CreateLogger<HuggingFaceModelAssetService>();
+        var cacheLogger = loggerFactory.CreateLogger<ParquetFileEmbeddingCacheService>();
+
+        var modelAssetService = new HuggingFaceModelAssetService(appDataPathProvider, modelLogger);
         var imageLibraryService = new StreamingParquetImageLibraryService(appDataPathProvider);
         var imagePreprocessingService = new PassThroughImagePreprocessingService();
         var imageClassifierService = new OnnxImageClassifierService(modelAssetService);
         var imageEmbeddingService = new OnnxImageEmbeddingService(modelAssetService);
-        var embeddingCacheService = new ParquetFileEmbeddingCacheService(appDataPathProvider);
+        var embeddingCacheService = new ParquetFileEmbeddingCacheService(appDataPathProvider, cacheLogger);
         var embeddingIndexService = new ParquetStreamingEmbeddingIndexService(embeddingCacheService);
 
         var startupController = new StartupController(
@@ -63,6 +88,30 @@ public sealed record BusinessServices(
             startupController,
             classificationController,
             similaritySearchController,
-            imageAnalysisController);
+            imageAnalysisController,
+            loggerFactory);
+    }
+
+    private static void CleanOldLogFiles(string logDir, int keepCount)
+    {
+        try
+        {
+            if (!Directory.Exists(logDir)) return;
+            var logFiles = Directory.EnumerateFiles(logDir, "app_*.log")
+                .OrderBy(f => f)
+                .ToList();
+
+            if (logFiles.Count > keepCount)
+            {
+                for (var i = 0; i < logFiles.Count - keepCount; i++)
+                {
+                    File.Delete(logFiles[i]);
+                }
+            }
+        }
+        catch
+        {
+            // Do not crash application startup on log cleanup failures
+        }
     }
 }
