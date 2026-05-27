@@ -11,7 +11,6 @@ public sealed record BusinessServices(
     IImagePreprocessingService ImagePreprocessingService,
     IImageClassifierService ImageClassifierService,
     IImageEmbeddingService ImageEmbeddingService,
-    IEmbeddingCacheService EmbeddingCacheService,
     IEmbeddingIndexService EmbeddingIndexService,
     StartupController StartupController,
     ClassificationController ClassificationController,
@@ -22,19 +21,15 @@ public sealed record BusinessServices(
     {
         var appDataPathProvider = new AppDataPathProvider(startDirectory);
         var modelAssetService = new HuggingFaceModelAssetService(appDataPathProvider);
-        var imageLibraryService = new StreamingParquetImageLibraryService(appDataPathProvider);
+        var imageLibraryService = new PrebuiltDatasetImageLibraryService(appDataPathProvider);
         var imagePreprocessingService = new PassThroughImagePreprocessingService();
         var imageClassifierService = new OnnxImageClassifierService(modelAssetService);
         var imageEmbeddingService = new OnnxImageEmbeddingService(modelAssetService);
-        var embeddingCacheService = new JsonFileEmbeddingCacheService(appDataPathProvider);
-        var embeddingIndexService = new InMemoryEmbeddingIndexService();
+        var embeddingIndexService = new DotVectorEmbeddingIndexService(appDataPathProvider);
 
         var startupController = new StartupController(
             modelAssetService,
             imageLibraryService,
-            imagePreprocessingService,
-            imageEmbeddingService,
-            embeddingCacheService,
             embeddingIndexService);
 
         var classificationController = new ClassificationController(
@@ -58,7 +53,6 @@ public sealed record BusinessServices(
             imagePreprocessingService,
             imageClassifierService,
             imageEmbeddingService,
-            embeddingCacheService,
             embeddingIndexService,
             startupController,
             classificationController,

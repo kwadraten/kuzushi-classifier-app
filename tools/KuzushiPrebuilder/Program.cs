@@ -904,8 +904,8 @@ internal sealed class PrebuildOptions
     public static PrebuildOptions Parse(string[] args)
     {
         var repoRoot = FullPath(GetValue(args, "--repo-root", Directory.GetCurrentDirectory()));
-        var modelDir = FullPath(GetValue(args, "--model-dir", Path.Combine(repoRoot, ".agents", "dev_data", "models", "shikiji")));
-        var datasetDir = FullPath(GetValue(args, "--dataset-data-dir", Path.Combine(repoRoot, ".agents", "dev_data", "datasets", "hi-utokyo-kuzushi", "data")));
+        var modelDir = FullPath(GetValue(args, "--model-dir", Path.Combine(repoRoot, ".agents", "dev_data", "models")));
+        var datasetDir = FullPath(GetValue(args, "--dataset-data-dir", Path.Combine(repoRoot, ".agents", "dev_data", "dataset", "data")));
         var outputRoot = FullPath(GetValue(args, "--output-root", Path.Combine(repoRoot, ".agents", "dev_data", "prebuilt", "kuzushi-shikiji-webp-dotvector")));
 
         var embeddingModelPath = FullPath(GetValue(

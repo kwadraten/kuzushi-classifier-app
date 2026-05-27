@@ -1,4 +1,8 @@
 using System.Net.Http;
+using System.Formats.Tar;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Platform;
@@ -11,26 +15,24 @@ public sealed class HuggingFaceModelAssetService :
     IDisposable
 {
     private const string DefaultModelRepo = "kwadraten/shikiji";
-    private const string DefaultDatasetRepo = "kwadraten/hi-utokyo-kuzushi";
     private const string HuggingFaceRawBase = "https://huggingface.co";
+    private const string PrebuiltDatasetUrl =
+        "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/kuzushi-shikiji-webp-dotvector.tar";
 
     private readonly IAppDataPathProvider _appDataPathProvider;
     private readonly HttpClient _httpClient;
     private readonly string _modelRepo;
-    private readonly string _datasetRepo;
 
     public HuggingFaceModelAssetService(
         IAppDataPathProvider appDataPathProvider,
-        string modelRepo = DefaultModelRepo,
-        string datasetRepo = DefaultDatasetRepo)
+        string modelRepo = DefaultModelRepo)
     {
         _appDataPathProvider = appDataPathProvider;
         _modelRepo = modelRepo;
-        _datasetRepo = datasetRepo;
 
         _httpClient = new HttpClient
         {
-            Timeout = TimeSpan.FromMinutes(30),
+            Timeout = TimeSpan.FromHours(4),
         };
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("KuzushiClassifierApp/1.0");
     }
@@ -92,26 +94,24 @@ public sealed class HuggingFaceModelAssetService :
         }
 
         var datasetDirectory = _appDataPathProvider.GetDatasetCacheDirectory();
-        var parquetDir = Path.Combine(datasetDirectory, "data");
-        var datasetReady = ParquetFilesExist(parquetDir);
+        var datasetReady = PrebuiltDatasetReady(datasetDirectory);
 
         if (!datasetReady)
         {
             progress?.Report(new AssetPreparationProgress(
                 AssetPreparationStep.DownloadingDataset,
-                "Downloading dataset from HuggingFace.",
+                "Downloading prebuilt dataset package.",
                 0.5));
 
-            await EnsureDatasetAsync(datasetDirectory, progress, cancellationToken)
+            await EnsurePrebuiltDatasetAsync(datasetDirectory, progress, cancellationToken)
                 .ConfigureAwait(false);
 
-            datasetReady = ParquetFilesExist(parquetDir);
+            datasetReady = PrebuiltDatasetReady(datasetDirectory);
 
             if (!datasetReady)
             {
                 throw new InvalidOperationException(
-                    "Failed to download dataset Parquet files. " +
-                    $"Ensure the dataset repository '{_datasetRepo}' is public.");
+                    "Failed to download and unpack the prebuilt dataset package.");
             }
         }
 
@@ -173,61 +173,38 @@ public sealed class HuggingFaceModelAssetService :
         }
     }
 
-    private async Task EnsureDatasetAsync(
+    private async Task EnsurePrebuiltDatasetAsync(
         string datasetDirectory,
         IProgress<AssetPreparationProgress>? progress,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(datasetDirectory);
 
-        var parquetDir = Path.Combine(datasetDirectory, "data");
-
-        var localParquetFiles = Directory.Exists(parquetDir)
-            ? Directory.EnumerateFiles(parquetDir, "*.parquet").OrderBy(f => f).ToArray()
-            : Array.Empty<string>();
-
-        if (localParquetFiles.Length == 0)
+        if (PrebuiltDatasetReady(datasetDirectory))
         {
-            progress?.Report(new AssetPreparationProgress(
-                AssetPreparationStep.DownloadingDataset,
-                "No local Parquet files found. Downloading from HuggingFace.",
-                0));
+            return;
+        }
 
-            Directory.CreateDirectory(parquetDir);
+        var tarPath = Path.Combine(datasetDirectory, "kuzushi-shikiji-webp-dotvector.tar");
 
-            var parquetFiles = await ListParquetFilesAsync(cancellationToken).ConfigureAwait(false);
+        await DownloadWithProgressAsync(
+            PrebuiltDatasetUrl,
+            tarPath,
+            AssetPreparationStep.DownloadingDataset,
+            "kuzushi-shikiji-webp-dotvector.tar",
+            progress,
+            cancellationToken)
+            .ConfigureAwait(false);
 
-            if (parquetFiles.Length == 0)
-            {
-                throw new InvalidOperationException(
-                    $"No Parquet files found in HuggingFace dataset '{_datasetRepo}'. " +
-                    "Please check the dataset repository is public.");
-            }
+        progress?.Report(new AssetPreparationProgress(
+            AssetPreparationStep.LoadingDataset,
+            "Unpacking prebuilt dataset package.",
+            0.95));
 
-            for (var i = 0; i < parquetFiles.Length; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var relativePath = parquetFiles[i];
-                var fileName = Path.GetFileName(relativePath);
-                var filePath = Path.Combine(parquetDir, fileName);
-
-                if (File.Exists(filePath))
-                {
-                    continue;
-                }
-
-                var url = $"{HuggingFaceRawBase}/datasets/{_datasetRepo}/resolve/main/{relativePath}";
-
-                await DownloadWithProgressAsync(
-                    url,
-                    filePath,
-                    AssetPreparationStep.DownloadingDataset,
-                    $"{fileName} ({i + 1} of {parquetFiles.Length})",
-                    progress,
-                    cancellationToken)
-                    .ConfigureAwait(false);
-            }
+        ExtractTarToDirectory(tarPath, datasetDirectory, cancellationToken);
+        if (PrebuiltDatasetReady(datasetDirectory))
+        {
+            File.Delete(tarPath);
         }
     }
 
@@ -239,54 +216,267 @@ public sealed class HuggingFaceModelAssetService :
         IProgress<AssetPreparationProgress>? progress,
         CancellationToken cancellationToken)
     {
-        using var response = await _httpClient
-            .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-            .ConfigureAwait(false);
-
-        response.EnsureSuccessStatusCode();
-
-        var totalBytes = response.Content.Headers.ContentLength ?? -1L;
-        var downloaded = 0L;
-        var buffer = new byte[8192];
-
         var tempPath = filePath + ".download";
-
-        await using var contentStream = await response.Content
-            .ReadAsStreamAsync(cancellationToken)
+        var buffer = new byte[1 << 20];
+        var retryCount = 0;
+        const int maxRetries = 5;
+        var remoteBytes = await TryGetRemoteContentLengthAsync(url, cancellationToken)
             .ConfigureAwait(false);
 
-        await using var fileStream = new FileStream(
-            tempPath, FileMode.Create, FileAccess.Write, FileShare.None,
-            buffer.Length, useAsync: true);
+        if (TryUseExistingDownloadFile(
+            filePath,
+            tempPath,
+            remoteBytes,
+            progress,
+            step,
+            label))
+        {
+            return;
+        }
 
         while (true)
         {
-            var read = await contentStream
-                .ReadAsync(buffer, cancellationToken)
-                .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (read == 0)
+            var existingBytes = File.Exists(tempPath)
+                ? new FileInfo(tempPath).Length
+                : 0L;
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            if (existingBytes > 0)
             {
-                break;
+                request.Headers.Range = new RangeHeaderValue(existingBytes, null);
             }
 
-            await fileStream
-                .WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+            try
+            {
+                using var response = await _httpClient
+                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (existingBytes > 0 && response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+                {
+                    remoteBytes ??= response.Content.Headers.ContentRange?.Length
+                        ?? await TryGetRemoteContentLengthAsync(url, cancellationToken)
+                            .ConfigureAwait(false);
+
+                    if (remoteBytes.HasValue && existingBytes == remoteBytes.Value)
+                    {
+                        ReportDownloadProgress(
+                            progress,
+                            step,
+                            label,
+                            existingBytes,
+                            remoteBytes.Value);
+
+                        File.Move(tempPath, filePath, overwrite: true);
+                        return;
+                    }
+
+                    if (remoteBytes.HasValue && existingBytes > remoteBytes.Value)
+                    {
+                        File.Delete(tempPath);
+                        retryCount = 0;
+                        continue;
+                    }
+
+                    File.Delete(tempPath);
+                    retryCount = 0;
+                    continue;
+                }
+
+                if (existingBytes > 0 && response.StatusCode == HttpStatusCode.OK)
+                {
+                    existingBytes = 0;
+                    File.Delete(tempPath);
+                }
+
+                response.EnsureSuccessStatusCode();
+
+                var responseBytes = response.Content.Headers.ContentLength ?? -1L;
+                var totalBytes = response.StatusCode == HttpStatusCode.PartialContent && responseBytes > 0
+                    ? existingBytes + responseBytes
+                    : remoteBytes ?? responseBytes;
+
+                await using var contentStream = await response.Content
+                    .ReadAsStreamAsync(cancellationToken)
+                    .ConfigureAwait(false);
+
+                await using var fileStream = new FileStream(
+                    tempPath,
+                    existingBytes > 0 ? FileMode.Append : FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None,
+                    buffer.Length,
+                    useAsync: true);
+
+                var downloaded = existingBytes;
+                var lastReport = Stopwatch.GetTimestamp();
+
+                ReportDownloadProgress(
+                    progress,
+                    step,
+                    label,
+                    downloaded,
+                    totalBytes);
+
+                while (true)
+                {
+                    var read = await contentStream
+                        .ReadAsync(buffer, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    await fileStream
+                        .WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+                        .ConfigureAwait(false);
+
+                    downloaded += read;
+
+                    if (ElapsedSince(lastReport) >= TimeSpan.FromSeconds(1))
+                    {
+                        lastReport = Stopwatch.GetTimestamp();
+                        ReportDownloadProgress(
+                            progress,
+                            step,
+                            label,
+                            downloaded,
+                            totalBytes);
+                    }
+                }
+
+                await fileStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+                ReportDownloadProgress(
+                    progress,
+                    step,
+                    label,
+                    downloaded,
+                    totalBytes);
+
+                if (remoteBytes.HasValue && downloaded != remoteBytes.Value)
+                {
+                    throw new IOException(
+                        $"Downloaded {FormatBytes(downloaded)} for {label}, expected {FormatBytes(remoteBytes.Value)}.");
+                }
+
+                File.Move(tempPath, filePath, overwrite: true);
+                return;
+            }
+            catch (IOException) when (retryCount < maxRetries)
+            {
+                retryCount++;
+                await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, retryCount * 2)), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (HttpRequestException) when (retryCount < maxRetries)
+            {
+                retryCount++;
+                await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, retryCount * 2)), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<long?> TryGetRemoteContentLengthAsync(
+        string url,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Head, url);
+
+        try
+        {
+            using var response = await _httpClient
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
 
-            downloaded += read;
+            return response.IsSuccessStatusCode
+                ? response.Content.Headers.ContentLength
+                : null;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
 
-            progress?.Report(new AssetPreparationProgress(
-                step,
-                $"Downloading {label}  ({FormatBytes(downloaded)}" +
-                    (totalBytes > 0 ? $" / {FormatBytes(totalBytes)}" : "") +
-                    ")",
-                Fraction: totalBytes > 0 ? (double)downloaded / totalBytes : null,
-                BytesDownloaded: downloaded,
-                TotalBytes: totalBytes > 0 ? totalBytes : null));
+    private static bool TryUseExistingDownloadFile(
+        string filePath,
+        string tempPath,
+        long? remoteBytes,
+        IProgress<AssetPreparationProgress>? progress,
+        AssetPreparationStep step,
+        string label)
+    {
+        if (File.Exists(filePath))
+        {
+            var fileBytes = new FileInfo(filePath).Length;
+            if (!remoteBytes.HasValue || fileBytes == remoteBytes.Value)
+            {
+                ReportDownloadProgress(progress, step, label, fileBytes, remoteBytes ?? fileBytes);
+                return true;
+            }
+
+            if (fileBytes > 0 && fileBytes < remoteBytes.Value && !File.Exists(tempPath))
+            {
+                File.Move(filePath, tempPath, overwrite: true);
+            }
+            else
+            {
+                File.Delete(filePath);
+            }
         }
 
-        File.Move(tempPath, filePath, overwrite: true);
+        if (!File.Exists(tempPath) || !remoteBytes.HasValue)
+        {
+            return false;
+        }
+
+        var tempBytes = new FileInfo(tempPath).Length;
+        if (tempBytes == remoteBytes.Value)
+        {
+            ReportDownloadProgress(progress, step, label, tempBytes, remoteBytes.Value);
+            File.Move(tempPath, filePath, overwrite: true);
+            return true;
+        }
+
+        if (tempBytes > remoteBytes.Value)
+        {
+            File.Delete(tempPath);
+        }
+
+        return false;
+    }
+
+    private static void ReportDownloadProgress(
+        IProgress<AssetPreparationProgress>? progress,
+        AssetPreparationStep step,
+        string label,
+        long downloaded,
+        long totalBytes)
+    {
+        progress?.Report(new AssetPreparationProgress(
+            step,
+            $"Downloading {label}  ({FormatBytes(downloaded)}" +
+                (totalBytes > 0 ? $" / {FormatBytes(totalBytes)}" : "") +
+                ")",
+            Fraction: totalBytes > 0 ? (double)downloaded / totalBytes : null,
+            BytesDownloaded: downloaded,
+            TotalBytes: totalBytes > 0 ? totalBytes : null));
+    }
+
+    private static TimeSpan ElapsedSince(long startTimestamp)
+    {
+        return TimeSpan.FromSeconds(
+            (Stopwatch.GetTimestamp() - startTimestamp) / (double)Stopwatch.Frequency);
     }
 
     private static string FormatBytes(long bytes)
@@ -300,57 +490,68 @@ public sealed class HuggingFaceModelAssetService :
         };
     }
 
-    private async Task<string[]> ListParquetFilesAsync(CancellationToken cancellationToken)
+    private static void ExtractTarToDirectory(
+        string tarPath,
+        string targetDirectory,
+        CancellationToken cancellationToken)
     {
-        var apiUrl = $"https://huggingface.co/api/datasets/{_datasetRepo}";
+        var targetRoot = Path.GetFullPath(targetDirectory);
+        var targetRootWithSeparator = targetRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? targetRoot
+            : targetRoot + Path.DirectorySeparatorChar;
+        Directory.CreateDirectory(targetRoot);
 
-        try
+        using var stream = File.OpenRead(tarPath);
+        using var reader = new TarReader(stream);
+
+        while (reader.GetNextEntry() is { } entry)
         {
-            var json = await _httpClient
-                .GetStringAsync(apiUrl, cancellationToken)
-                .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            using var doc = JsonDocument.Parse(json);
-
-            if (doc.RootElement.TryGetProperty("siblings", out var siblings))
+            if (string.IsNullOrWhiteSpace(entry.Name))
             {
-                var files = new List<string>();
-
-                foreach (var sibling in siblings.EnumerateArray())
-                {
-                    if (sibling.TryGetProperty("rfilename", out var rfilename))
-                    {
-                        var path = rfilename.GetString();
-                        if (path is not null && path.StartsWith("data/") && path.EndsWith(".parquet"))
-                        {
-                            files.Add(path);
-                        }
-                    }
-                }
-
-                return files.ToArray();
+                continue;
             }
-        }
-        catch
-        {
-            // Fallback: try with known shard names
-        }
 
-        // Common Parquet shard patterns for HF datasets
-        return new[]
-        {
-            "data/train-00000-of-00005.parquet",
-            "data/train-00001-of-00005.parquet",
-            "data/train-00002-of-00005.parquet",
-            "data/train-00003-of-00005.parquet",
-            "data/train-00004-of-00005.parquet",
-        };
+            var normalizedName = entry.Name.Replace('\\', Path.DirectorySeparatorChar);
+            var destinationPath = Path.GetFullPath(Path.Combine(targetRoot, normalizedName));
+
+            if (!destinationPath.Equals(targetRoot, StringComparison.OrdinalIgnoreCase)
+                && !destinationPath.StartsWith(targetRootWithSeparator, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Unsafe tar entry path: {entry.Name}");
+            }
+
+            if (entry.EntryType is TarEntryType.Directory)
+            {
+                Directory.CreateDirectory(destinationPath);
+                continue;
+            }
+
+            var directory = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            entry.ExtractToFile(destinationPath, overwrite: true);
+        }
     }
 
-    private static bool ParquetFilesExist(string parquetDir)
+    private static bool PrebuiltDatasetReady(string datasetDirectory)
     {
-        return Directory.Exists(parquetDir)
-            && Directory.EnumerateFiles(parquetDir, "*.parquet").Any();
+        return File.Exists(Path.Combine(datasetDirectory, "manifest.json"))
+            && File.Exists(Path.Combine(datasetDirectory, "metadata", "records.jsonl"))
+            && Directory.Exists(Path.Combine(datasetDirectory, "images-webp"))
+            && Directory.EnumerateFiles(
+                Path.Combine(datasetDirectory, "images-webp"),
+                "*.webp",
+                SearchOption.AllDirectories).Any()
+            && Directory.Exists(Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-hnsw"))
+            && Directory.EnumerateFiles(
+                Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-hnsw"),
+                "*",
+                SearchOption.AllDirectories).Any(file => new FileInfo(file).Length > 1024);
     }
 
     private static bool ModelFilesReady(string modelDirectory, string baseName)
