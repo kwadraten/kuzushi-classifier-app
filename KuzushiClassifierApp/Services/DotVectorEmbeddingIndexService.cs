@@ -16,7 +16,7 @@ public sealed class DotVectorEmbeddingIndexService : IEmbeddingIndexService, IDi
         ArgumentNullException.ThrowIfNull(appDataPathProvider);
 
         _datasetDirectory = appDataPathProvider.GetDatasetCacheDirectory();
-        _vectorDirectory = Path.Combine(_datasetDirectory, "vectors", "dotvector-shikiji-hnsw");
+        _vectorDirectory = Path.Combine(_datasetDirectory, "vectors", "dotvector-shikiji-diskann");
     }
 
     public bool IsReady => _collection is not null;

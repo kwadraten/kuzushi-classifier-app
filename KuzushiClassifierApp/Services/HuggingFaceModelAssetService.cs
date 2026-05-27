@@ -17,7 +17,7 @@ public sealed class HuggingFaceModelAssetService :
     private const string DefaultModelRepo = "kwadraten/shikiji";
     private const string HuggingFaceRawBase = "https://huggingface.co";
     private const string PrebuiltDatasetUrl =
-        "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/kuzushi-shikiji-webp-dotvector.tar";
+        "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/kuzushi-shikiji-webp-dotvector-diskann.tar";
 
     private readonly IAppDataPathProvider _appDataPathProvider;
     private readonly HttpClient _httpClient;
@@ -185,13 +185,13 @@ public sealed class HuggingFaceModelAssetService :
             return;
         }
 
-        var tarPath = Path.Combine(datasetDirectory, "kuzushi-shikiji-webp-dotvector.tar");
+        var tarPath = Path.Combine(datasetDirectory, "kuzushi-shikiji-webp-dotvector-diskann.tar");
 
         await DownloadWithProgressAsync(
             PrebuiltDatasetUrl,
             tarPath,
             AssetPreparationStep.DownloadingDataset,
-            "kuzushi-shikiji-webp-dotvector.tar",
+            "kuzushi-shikiji-webp-dotvector-diskann.tar",
             progress,
             cancellationToken)
             .ConfigureAwait(false);
@@ -547,9 +547,9 @@ public sealed class HuggingFaceModelAssetService :
                 Path.Combine(datasetDirectory, "images-webp"),
                 "*.webp",
                 SearchOption.AllDirectories).Any()
-            && Directory.Exists(Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-hnsw"))
+            && Directory.Exists(Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-diskann"))
             && Directory.EnumerateFiles(
-                Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-hnsw"),
+                Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-diskann"),
                 "*",
                 SearchOption.AllDirectories).Any(file => new FileInfo(file).Length > 1024);
     }

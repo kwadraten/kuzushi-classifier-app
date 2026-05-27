@@ -5,7 +5,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DotVector.Api;
-using DotVector.Index.Hnsw;
+using DotVector.Index.DiskAnn;
 using DotVector.Model;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -426,8 +426,7 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
             "images",
             768,
             Metric.Cosine,
-            IndexKind.Hnsw,
-            HnswOptions.Default);
+            VamanaOptions.Default);
 
         var output = new BlockingCollection<EmbeddedRecord>(options.GroupSize * options.BuildWorkers);
         var writerTask = Task.Run(() => WriteEmbeddingBatches(db, collection, output, metadata, records.Length));
@@ -525,7 +524,6 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
                 StoreBatch(collection, batch);
                 stored += batch.Count;
                 batch.Clear();
-                db.Flush();
             }
         }
 
@@ -606,14 +604,14 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
             EmbeddingDimension = 768,
             EmbeddingImageSize = metadata.ImageSize,
             VectorProvider = "DotVector.Core",
-            VectorIndex = "HNSW",
+            VectorIndex = "DiskANN/Vamana",
             ImageFormat = "webp",
             options.WebpQuality,
             options.MaxWidth,
             RecordCount = recordCount,
             Records = "metadata/records.jsonl",
             Images = "images-webp/",
-            Vectors = "vectors/dotvector-shikiji-hnsw/",
+            Vectors = "vectors/dotvector-shikiji-diskann/",
         };
 
         File.WriteAllText(
@@ -675,7 +673,9 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
                 return false;
             }
 
-            return recordCount.GetInt32() == expectedRecordCount;
+            return recordCount.GetInt32() == expectedRecordCount
+                && doc.RootElement.TryGetProperty("vectorIndex", out var vectorIndex)
+                && vectorIndex.GetString() == "DiskANN/Vamana";
         }
         catch
         {
@@ -896,7 +896,7 @@ internal sealed class PrebuildOptions
 
     public string ImageDirectory => Path.Combine(OutputRoot, "images-webp");
     public string MetadataDirectory => Path.Combine(OutputRoot, "metadata");
-    public string VectorDirectory => Path.Combine(OutputRoot, "vectors", "dotvector-shikiji-hnsw");
+    public string VectorDirectory => Path.Combine(OutputRoot, "vectors", "dotvector-shikiji-diskann");
     public string RecordsPath => Path.Combine(MetadataDirectory, "records.jsonl");
     public string ManifestPath => Path.Combine(OutputRoot, "manifest.json");
     public string TarPath => OutputRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".tar";
@@ -905,8 +905,8 @@ internal sealed class PrebuildOptions
     {
         var repoRoot = FullPath(GetValue(args, "--repo-root", Directory.GetCurrentDirectory()));
         var modelDir = FullPath(GetValue(args, "--model-dir", Path.Combine(repoRoot, ".agents", "dev_data", "models")));
-        var datasetDir = FullPath(GetValue(args, "--dataset-data-dir", Path.Combine(repoRoot, ".agents", "dev_data", "dataset", "data")));
-        var outputRoot = FullPath(GetValue(args, "--output-root", Path.Combine(repoRoot, ".agents", "dev_data", "prebuilt", "kuzushi-shikiji-webp-dotvector")));
+        var datasetDir = FullPath(GetValue(args, "--dataset-data-dir", Path.Combine(repoRoot, ".agents", "dev_data", "datasets", "data")));
+        var outputRoot = FullPath(GetValue(args, "--output-root", Path.Combine(repoRoot, ".agents", "dev_data", "prebuilt", "kuzushi-shikiji-webp-dotvector-diskann")));
 
         var embeddingModelPath = FullPath(GetValue(
             args,
