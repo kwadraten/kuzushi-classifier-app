@@ -57,6 +57,8 @@ dotnet publish KuzushiClassifierApp.Android\KuzushiClassifierApp.Android.csproj 
 
 ## 预构建工具
 
+开发环境的 `.agents/dev_data/prebuilt` 仅用于生成和检查预构建产物，运行时不能直接从该目录读取数据。应用启动时的资源加载顺序是：先准备模型，再准备 HuggingFace 数据集 shard，最后下载并解包远端 DiskANN 索引 tar。远端 tar 只打包 `manifest.json` 和 `vectors/dotvector-shikiji-diskann/`；匹配结果里的图片继续从本地 shard 读取，不从预构建 tar 或开发目录读取。
+
 启动测试：
 
 ```powershell
@@ -69,7 +71,7 @@ dotnet run --project tools\KuzushiPrebuilder\KuzushiPrebuilder.csproj -- --repo-
 dotnet build tools\KuzushiPrebuilder\KuzushiPrebuilder.csproj
 ```
 
-打包预构建数据：
+打包预构建 DiskANN 索引：
 
 ```powershell
 dotnet run --project tools\KuzushiPrebuilder\KuzushiPrebuilder.csproj -c Release -- --repo-root . --download-parallelism 2 --build-workers 4 --group-size 1000 --webp-quality 75 --max-width 123 --force

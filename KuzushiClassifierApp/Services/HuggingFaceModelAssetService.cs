@@ -15,20 +15,24 @@ public sealed class HuggingFaceModelAssetService :
     IDisposable
 {
     private const string DefaultModelRepo = "kwadraten/shikiji";
+    private const string DefaultDatasetRepo = "kwadraten/hi-utokyo-kuzushi";
     private const string HuggingFaceRawBase = "https://huggingface.co";
-    private const string PrebuiltDatasetUrl =
+    private const string PrebuiltIndexUrl =
         "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/kuzushi-shikiji-webp-dotvector-diskann.tar";
 
     private readonly IAppDataPathProvider _appDataPathProvider;
     private readonly HttpClient _httpClient;
     private readonly string _modelRepo;
+    private readonly string _datasetRepo;
 
     public HuggingFaceModelAssetService(
         IAppDataPathProvider appDataPathProvider,
-        string modelRepo = DefaultModelRepo)
+        string modelRepo = DefaultModelRepo,
+        string datasetRepo = DefaultDatasetRepo)
     {
         _appDataPathProvider = appDataPathProvider;
         _modelRepo = modelRepo;
+        _datasetRepo = datasetRepo;
 
         _httpClient = new HttpClient
         {
@@ -51,6 +55,15 @@ public sealed class HuggingFaceModelAssetService :
         "supervised_pretrain_checkpoint.metadata.json",
         "supervised_pretrain_checkpoint.embedding.onnx",
         "supervised_pretrain_checkpoint.embedding.metadata.json",
+    };
+
+    private static readonly string[] DefaultDatasetShardPaths =
+    {
+        "data/train-00000-of-00005.parquet",
+        "data/train-00001-of-00005.parquet",
+        "data/train-00002-of-00005.parquet",
+        "data/train-00003-of-00005.parquet",
+        "data/train-00004-of-00005.parquet",
     };
 
     public async Task<ModelAssetStatus> PrepareAsync(
@@ -94,24 +107,44 @@ public sealed class HuggingFaceModelAssetService :
         }
 
         var datasetDirectory = _appDataPathProvider.GetDatasetCacheDirectory();
-        var datasetReady = PrebuiltDatasetReady(datasetDirectory);
+        var parquetDir = Path.Combine(datasetDirectory, "data");
+        var datasetReady = DatasetShardsReady(parquetDir);
 
         if (!datasetReady)
         {
             progress?.Report(new AssetPreparationProgress(
                 AssetPreparationStep.DownloadingDataset,
-                "Downloading prebuilt dataset package.",
+                "Downloading dataset shards from HuggingFace.",
                 0.5));
 
-            await EnsurePrebuiltDatasetAsync(datasetDirectory, progress, cancellationToken)
+            await EnsureDatasetShardsAsync(datasetDirectory, progress, cancellationToken)
                 .ConfigureAwait(false);
 
-            datasetReady = PrebuiltDatasetReady(datasetDirectory);
+            datasetReady = DatasetShardsReady(parquetDir);
 
             if (!datasetReady)
             {
                 throw new InvalidOperationException(
-                    "Failed to download and unpack the prebuilt dataset package.");
+                    "Failed to download dataset Parquet shards. " +
+                    $"Ensure the dataset repository '{_datasetRepo}' is public.");
+            }
+        }
+
+        var indexReady = PrebuiltIndexReady(datasetDirectory);
+        if (!indexReady)
+        {
+            progress?.Report(new AssetPreparationProgress(
+                AssetPreparationStep.DownloadingDataset,
+                "Downloading prebuilt DiskANN embedding index.",
+                0.75));
+
+            await EnsurePrebuiltIndexAsync(datasetDirectory, progress, cancellationToken)
+                .ConfigureAwait(false);
+
+            indexReady = PrebuiltIndexReady(datasetDirectory);
+            if (!indexReady)
+            {
+                throw new InvalidOperationException("Failed to download and unpack the prebuilt DiskANN index.");
             }
         }
 
@@ -123,7 +156,7 @@ public sealed class HuggingFaceModelAssetService :
         return new ModelAssetStatus(
             ClassifierModelReady: classifierReady,
             EmbeddingModelReady: embeddingReady,
-            DatasetReady: datasetReady,
+            DatasetReady: datasetReady && indexReady,
             EmbeddingIndexReady: false,
             CacheDirectory: _appDataPathProvider.GetAppDataDirectory());
     }
@@ -173,14 +206,108 @@ public sealed class HuggingFaceModelAssetService :
         }
     }
 
-    private async Task EnsurePrebuiltDatasetAsync(
+    private async Task EnsureDatasetShardsAsync(
         string datasetDirectory,
         IProgress<AssetPreparationProgress>? progress,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(datasetDirectory);
 
-        if (PrebuiltDatasetReady(datasetDirectory))
+        var parquetDir = Path.Combine(datasetDirectory, "data");
+        Directory.CreateDirectory(parquetDir);
+
+        var parquetFiles = await ListParquetFilesAsync(cancellationToken).ConfigureAwait(false);
+        if (parquetFiles.Length == 0)
+        {
+            throw new InvalidOperationException(
+                $"No Parquet files found in HuggingFace dataset '{_datasetRepo}'. " +
+                "Please check the dataset repository is public.");
+        }
+
+        for (var i = 0; i < parquetFiles.Length; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var relativePath = parquetFiles[i];
+            var fileName = Path.GetFileName(relativePath);
+            var filePath = Path.Combine(parquetDir, fileName);
+
+            if (File.Exists(filePath) && new FileInfo(filePath).Length > 1024)
+            {
+                continue;
+            }
+
+            var url = $"{HuggingFaceRawBase}/datasets/{_datasetRepo}/resolve/main/{relativePath}";
+
+            await DownloadWithProgressAsync(
+                url,
+                filePath,
+                AssetPreparationStep.DownloadingDataset,
+                $"{fileName} ({i + 1} of {parquetFiles.Length})",
+                progress,
+                cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task<string[]> ListParquetFilesAsync(CancellationToken cancellationToken)
+    {
+        var apiUrl = $"{HuggingFaceRawBase}/api/datasets/{_datasetRepo}";
+
+        try
+        {
+            var json = await _httpClient
+                .GetStringAsync(apiUrl, cancellationToken)
+                .ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+
+            if (doc.RootElement.TryGetProperty("siblings", out var siblings))
+            {
+                var files = new List<string>();
+
+                foreach (var sibling in siblings.EnumerateArray())
+                {
+                    if (!sibling.TryGetProperty("rfilename", out var rfilename))
+                    {
+                        continue;
+                    }
+
+                    var path = rfilename.GetString();
+                    if (path is not null
+                        && path.StartsWith("data/", StringComparison.Ordinal)
+                        && path.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        files.Add(path);
+                    }
+                }
+
+                if (files.Count > 0)
+                {
+                    return files.Order(StringComparer.Ordinal).ToArray();
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+        }
+        catch (JsonException)
+        {
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+        }
+
+        return DefaultDatasetShardPaths;
+    }
+
+    private async Task EnsurePrebuiltIndexAsync(
+        string datasetDirectory,
+        IProgress<AssetPreparationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(datasetDirectory);
+
+        if (PrebuiltIndexReady(datasetDirectory))
         {
             return;
         }
@@ -188,7 +315,7 @@ public sealed class HuggingFaceModelAssetService :
         var tarPath = Path.Combine(datasetDirectory, "kuzushi-shikiji-webp-dotvector-diskann.tar");
 
         await DownloadWithProgressAsync(
-            PrebuiltDatasetUrl,
+            PrebuiltIndexUrl,
             tarPath,
             AssetPreparationStep.DownloadingDataset,
             "kuzushi-shikiji-webp-dotvector-diskann.tar",
@@ -198,11 +325,11 @@ public sealed class HuggingFaceModelAssetService :
 
         progress?.Report(new AssetPreparationProgress(
             AssetPreparationStep.LoadingDataset,
-            "Unpacking prebuilt dataset package.",
+            "Unpacking prebuilt DiskANN index.",
             0.95));
 
         ExtractTarToDirectory(tarPath, datasetDirectory, cancellationToken);
-        if (PrebuiltDatasetReady(datasetDirectory))
+        if (PrebuiltIndexReady(datasetDirectory))
         {
             File.Delete(tarPath);
         }
@@ -419,13 +546,16 @@ public sealed class HuggingFaceModelAssetService :
         if (File.Exists(filePath))
         {
             var fileBytes = new FileInfo(filePath).Length;
-            if (!remoteBytes.HasValue || fileBytes == remoteBytes.Value)
+            if (fileBytes > 0 && (!remoteBytes.HasValue || fileBytes == remoteBytes.Value))
             {
                 ReportDownloadProgress(progress, step, label, fileBytes, remoteBytes ?? fileBytes);
                 return true;
             }
 
-            if (fileBytes > 0 && fileBytes < remoteBytes.Value && !File.Exists(tempPath))
+            if (fileBytes > 0
+                && remoteBytes.HasValue
+                && fileBytes < remoteBytes.Value
+                && !File.Exists(tempPath))
             {
                 File.Move(filePath, tempPath, overwrite: true);
             }
@@ -538,15 +668,19 @@ public sealed class HuggingFaceModelAssetService :
         }
     }
 
-    private static bool PrebuiltDatasetReady(string datasetDirectory)
+    private static bool DatasetShardsReady(string parquetDir)
+    {
+        return Directory.Exists(parquetDir)
+            && DefaultDatasetShardPaths.All(relativePath =>
+            {
+                var filePath = Path.Combine(parquetDir, Path.GetFileName(relativePath));
+                return File.Exists(filePath) && new FileInfo(filePath).Length > 1024;
+            });
+    }
+
+    private static bool PrebuiltIndexReady(string datasetDirectory)
     {
         return File.Exists(Path.Combine(datasetDirectory, "manifest.json"))
-            && File.Exists(Path.Combine(datasetDirectory, "metadata", "records.jsonl"))
-            && Directory.Exists(Path.Combine(datasetDirectory, "images-webp"))
-            && Directory.EnumerateFiles(
-                Path.Combine(datasetDirectory, "images-webp"),
-                "*.webp",
-                SearchOption.AllDirectories).Any()
             && Directory.Exists(Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-diskann"))
             && Directory.EnumerateFiles(
                 Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-diskann"),

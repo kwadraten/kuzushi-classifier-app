@@ -70,10 +70,12 @@ public sealed class DotVectorEmbeddingIndexService : IEmbeddingIndexService, IDi
             {
                 var imageId = result.Key;
                 var label = GetPayloadString(result.Payload, "label");
-                var imageFile = GetPayloadString(result.Payload, "image_file");
-                var localPath = string.IsNullOrWhiteSpace(imageFile)
+                var shardFile = GetPayloadString(result.Payload, "shard_file");
+                var rowGroup = GetPayloadInt(result.Payload, "row_group");
+                var row = GetPayloadInt(result.Payload, "row");
+                var localPath = string.IsNullOrWhiteSpace(shardFile) || rowGroup < 0 || row < 0
                     ? null
-                    : Path.Combine(_datasetDirectory, imageFile);
+                    : $"{Path.Combine(_datasetDirectory, "data", shardFile)}::{rowGroup}::{row}";
 
                 return new SimilarImageResult(
                     new DatasetImage(imageId, label, SourceUri: null, LocalPath: localPath),
@@ -100,5 +102,22 @@ public sealed class DotVectorEmbeddingIndexService : IEmbeddingIndexService, IDi
         }
 
         return value.ToString() ?? "";
+    }
+
+    private static int GetPayloadInt(
+        IReadOnlyDictionary<string, object?>? payload,
+        string key)
+    {
+        if (payload is null || !payload.TryGetValue(key, out var value) || value is null)
+        {
+            return -1;
+        }
+
+        if (value is int intValue)
+        {
+            return intValue;
+        }
+
+        return int.TryParse(value.ToString(), out var parsed) ? parsed : -1;
     }
 }

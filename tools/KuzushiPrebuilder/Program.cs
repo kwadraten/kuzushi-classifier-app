@@ -550,7 +550,9 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
             var payload = new Dictionary<string, object>
             {
                 ["label"] = record.Label,
-                ["image_file"] = record.ImageFile,
+                ["shard_file"] = record.ShardFile,
+                ["row_group"] = record.RowGroup,
+                ["row"] = record.Row,
                 ["original_width"] = record.OriginalWidth,
                 ["original_height"] = record.OriginalHeight,
                 ["compressed_width"] = record.CompressedWidth,
@@ -609,8 +611,6 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
             options.WebpQuality,
             options.MaxWidth,
             RecordCount = recordCount,
-            Records = "metadata/records.jsonl",
-            Images = "images-webp/",
             Vectors = "vectors/dotvector-shikiji-diskann/",
         };
 
@@ -696,11 +696,46 @@ internal sealed class PrebuildPipeline(PrebuildOptions options)
             .Start(context =>
             {
                 var task = context.AddTask("打包", maxValue: 1);
-                TarFile.CreateFromDirectory(options.OutputRoot, options.TarPath, includeBaseDirectory: false);
+                using var stream = File.Create(options.TarPath);
+                using var writer = new TarWriter(stream, leaveOpen: false);
+                AddFileToTar(writer, options.ManifestPath, "manifest.json");
+                AddDirectoryToTar(writer, Path.Combine(options.OutputRoot, "vectors"), "vectors");
                 task.Increment(1);
             });
 
         Console.WriteLine($"打包完成：{options.TarPath}");
+    }
+
+    private static void AddDirectoryToTar(TarWriter writer, string sourceDirectory, string entryDirectory)
+    {
+        foreach (var directory in Directory.EnumerateDirectories(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDirectory, directory).Replace('\\', '/');
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.Directory, $"{entryDirectory}/{relative}/"));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDirectory, file).Replace('\\', '/');
+            AddFileToTar(writer, file, $"{entryDirectory}/{relative}");
+        }
+    }
+
+    private static void AddFileToTar(TarWriter writer, string sourceFile, string entryName)
+    {
+        var entry = new PaxTarEntry(TarEntryType.RegularFile, entryName)
+        {
+            DataStream = File.OpenRead(sourceFile),
+        };
+
+        try
+        {
+            writer.WriteEntry(entry);
+        }
+        finally
+        {
+            entry.DataStream.Dispose();
+        }
     }
 
     private static EmbeddingMetadata LoadEmbeddingMetadata(string path)
