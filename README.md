@@ -2,6 +2,8 @@
 
 `KuzushiClassifierApp` 是一个基于 Avalonia UI、ONNX Runtime 和 Parquet 数据集构建的日语古籍崩字（Kuzushi）识别与相似样本匹配的高性能跨平台应用程序（支持桌面端与安卓端）。
 
+![截图](./screenshot.png)
+
 ---
 
 ## 项目结构 (Project Structure)
