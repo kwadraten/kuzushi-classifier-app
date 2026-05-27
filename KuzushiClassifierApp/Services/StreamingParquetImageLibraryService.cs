@@ -1,78 +1,64 @@
+using System.Runtime.CompilerServices;
 using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Platform;
+using Parquet;
+using Parquet.Schema;
 
 namespace KuzushiClassifierApp.Services;
 
 public sealed class StreamingParquetImageLibraryService : IImageLibraryService
 {
-    private readonly string _parquetDir;
-    private readonly string _parquetDirFullPath;
+    private readonly string _embeddingsPath;
 
     public StreamingParquetImageLibraryService(IAppDataPathProvider appDataPathProvider)
     {
-        _parquetDir = Path.Combine(appDataPathProvider.GetDatasetCacheDirectory(), "data");
-        _parquetDirFullPath = Path.GetFullPath(_parquetDir);
+        ArgumentNullException.ThrowIfNull(appDataPathProvider);
+
+        _embeddingsPath = Path.Combine(
+            appDataPathProvider.GetDatasetCacheDirectory(),
+            ParquetFileEmbeddingCacheService.CacheFileName);
     }
 
     public async Task<IReadOnlyList<DatasetImage>> LoadImagesAsync(
         CancellationToken cancellationToken = default,
         IProgress<AssetPreparationProgress>? progress = null)
     {
-        var parquetFiles = GetParquetFiles();
         var images = new List<DatasetImage>();
 
-        for (var fileIndex = 0; fileIndex < parquetFiles.Length; fileIndex++)
+        await using var reader = await OpenReaderAsync(cancellationToken).ConfigureAwait(false);
+        var fields = GetRequiredFields(reader.Schema);
+
+        for (var rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var file = parquetFiles[fileIndex];
-            var fileName = Path.GetFileName(file);
-
             progress?.Report(new AssetPreparationProgress(
                 AssetPreparationStep.LoadingDataset,
-                $"Scanning Parquet metadata: {fileName} ({fileIndex + 1} of {parquetFiles.Length}).",
-                Fraction: (double)fileIndex / parquetFiles.Length,
+                $"Scanning image embedding metadata: row group {rowGroupIndex + 1} of {reader.RowGroupCount}.",
+                Fraction: (double)rowGroupIndex / reader.RowGroupCount,
                 ItemsProcessed: images.Count));
 
-            await using var fs = File.OpenRead(file);
-            await using var reader = await Parquet.ParquetReader
-                .CreateAsync(fs, cancellationToken: cancellationToken)
+            using var rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
+            var rowCount = checked((int)rowGroupReader.RowCount);
+
+            var ids = await ReadStringColumnAsync(rowGroupReader, fields.Id, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var labels = await ReadStringColumnAsync(rowGroupReader, fields.Label, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var shards = await ReadStringColumnAsync(rowGroupReader, fields.Shard, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var sourceRowGroups = await ReadInt16ColumnAsync(rowGroupReader, fields.RowGroup, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var sourceRows = await ReadInt32ColumnAsync(rowGroupReader, fields.Row, rowCount, cancellationToken)
                 .ConfigureAwait(false);
 
-            var dataFields = reader.Schema.GetDataFields();
-            var charField = dataFields.FirstOrDefault(f =>
-                f.Name.Equals("char", StringComparison.OrdinalIgnoreCase));
-
-            if (charField is null)
+            for (var row = 0; row < rowCount; row++)
             {
-                var found = string.Join(", ", dataFields.Select(f => f.Name));
-                throw new InvalidOperationException(
-                    $"Column 'char' not found in Parquet file {fileName}. " +
-                    $"Available columns: [{found}]");
-            }
-
-            for (var rgi = 0; rgi < reader.RowGroupCount; rgi++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                using var rowGroupReader = reader.OpenRowGroupReader(rgi);
-                var rowCount = (int)rowGroupReader.RowCount;
-
-                var charValues = new string?[rowCount];
-                await rowGroupReader
-                    .ReadAsync(charField, charValues.AsMemory(), null, cancellationToken)
-                    .ConfigureAwait(false);
-
-                for (var row = 0; row < rowCount; row++)
-                {
-                    var globalIndex = images.Count;
-
-                    images.Add(new DatasetImage(
-                        Id: $"parq_{globalIndex:D6}",
-                        Label: charValues[row] ?? "",
-                        SourceUri: null,
-                        LocalPath: BuildShardReference(fileName, rgi, row)));
-                }
+                images.Add(new DatasetImage(
+                    ids[row] ?? $"parq_{images.Count:D6}",
+                    labels[row] ?? "",
+                    SourceUri: null,
+                    LocalPath: BuildImageReference(shards[row], sourceRowGroups[row], sourceRows[row])));
             }
         }
 
@@ -83,118 +69,182 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
         DatasetImage image,
         CancellationToken cancellationToken = default)
     {
-        var parsed = ParseLocalPath(image.LocalPath);
-        if (parsed is null)
-        {
-            throw new InvalidOperationException(
-                $"Cannot resolve image {image.Id} from local path.");
-        }
+        ArgumentNullException.ThrowIfNull(image);
 
-        var shardPath = ResolveShardPath(parsed.Value.File);
-        var bytes = await ReadImageBytesAsync(
-            shardPath, parsed.Value.RowGroup, parsed.Value.Row, cancellationToken)
-            .ConfigureAwait(false);
+        var selector = TryParseImageReference(image.LocalPath);
 
-        return KuzushiImage.FromBytes(bytes, $"{image.Id}.png", "image/png", image.Id);
-    }
+        await using var reader = await OpenReaderAsync(cancellationToken).ConfigureAwait(false);
+        var fields = GetRequiredFields(reader.Schema);
 
-    public async IAsyncEnumerable<(DatasetImage Metadata, KuzushiImage Image)> StreamAllImagesAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var parquetFiles = GetParquetFiles();
-        var globalIndex = 0;
-
-        foreach (var file in parquetFiles)
+        for (var rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            await using var fs = File.OpenRead(file);
-            await using var reader = await Parquet.ParquetReader
-                .CreateAsync(fs, cancellationToken: cancellationToken)
+            using var rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
+            var rowCount = checked((int)rowGroupReader.RowCount);
+
+            var webpBytes = await TryLoadImageFromRowGroupAsync(
+                    rowGroupReader,
+                    fields,
+                    rowCount,
+                    selector,
+                    image.Id,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
-            var dataFields = reader.Schema.GetDataFields();
-            var imageField = dataFields.FirstOrDefault(f =>
-                f.Name.Equals("image", StringComparison.OrdinalIgnoreCase))
-                ?? dataFields.FirstOrDefault(f =>
-                f.Name.Equals("bytes", StringComparison.OrdinalIgnoreCase));
-            var charField = dataFields.FirstOrDefault(f =>
-                f.Name.Equals("char", StringComparison.OrdinalIgnoreCase));
-
-            if (imageField is null || charField is null)
+            if (webpBytes is not null)
             {
-                var found = string.Join(", ", dataFields.Select(f => f.Name));
-                var missing = imageField is null ? "'image'/'bytes'" : "";
-                missing += imageField is null && charField is null ? " and " : "";
-                missing += charField is null ? "'char'" : "";
-                throw new InvalidOperationException(
-                    $"Required column(s) {missing} not found in Parquet file {Path.GetFileName(file)}. " +
-                    $"Available columns: [{found}]");
+                return KuzushiImage.FromBytes(
+                    webpBytes,
+                    $"{image.Id}.webp",
+                    "image/webp",
+                    image.Id);
             }
+        }
 
-            for (var rgi = 0; rgi < reader.RowGroupCount; rgi++)
+        throw new InvalidOperationException($"Cannot resolve image {image.Id} from embedding Parquet.");
+    }
+
+    public async IAsyncEnumerable<(DatasetImage Metadata, KuzushiImage Image)> StreamAllImagesAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await using var reader = await OpenReaderAsync(cancellationToken).ConfigureAwait(false);
+        var fields = GetRequiredFields(reader.Schema);
+        var globalIndex = 0;
+
+        for (var rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
+            var rowCount = checked((int)rowGroupReader.RowCount);
+
+            var ids = await ReadStringColumnAsync(rowGroupReader, fields.Id, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var labels = await ReadStringColumnAsync(rowGroupReader, fields.Label, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var shards = await ReadStringColumnAsync(rowGroupReader, fields.Shard, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var sourceRowGroups = await ReadInt16ColumnAsync(rowGroupReader, fields.RowGroup, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var sourceRows = await ReadInt32ColumnAsync(rowGroupReader, fields.Row, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var webps = await ReadBinaryColumnAsync(rowGroupReader, fields.Webp, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+
+            for (var row = 0; row < rowCount; row++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                var id = ids[row] ?? $"parq_{globalIndex:D6}";
+                var metadata = new DatasetImage(
+                    id,
+                    labels[row] ?? "",
+                    SourceUri: null,
+                    LocalPath: BuildImageReference(shards[row], sourceRowGroups[row], sourceRows[row]));
 
-                using var rowGroupReader = reader.OpenRowGroupReader(rgi);
-                var rowCount = (int)rowGroupReader.RowCount;
+                var bytes = webps[row];
+                globalIndex++;
 
-                var imageBytes = new byte[]?[rowCount];
-                await rowGroupReader
-                    .ReadAsync(imageField, imageBytes.AsMemory(), null, cancellationToken)
-                    .ConfigureAwait(false);
-
-                var charValues = new string?[rowCount];
-                await rowGroupReader
-                    .ReadAsync(charField, charValues.AsMemory(), null, cancellationToken)
-                    .ConfigureAwait(false);
-
-                for (var row = 0; row < rowCount; row++)
+                if (bytes is null || bytes.Length == 0)
                 {
-                    var metadata = new DatasetImage(
-                        Id: $"parq_{globalIndex:D6}",
-                        Label: charValues[row] ?? "",
-                        SourceUri: null,
-                        LocalPath: BuildShardReference(Path.GetFileName(file), rgi, row));
+                    continue;
+                }
 
-                    var bytes = imageBytes[row];
-                    if (bytes is null || bytes.Length == 0)
-                    {
-                        globalIndex++;
-                        continue;
-                    }
+                yield return (
+                    metadata,
+                    KuzushiImage.FromBytes(bytes, $"{id}.webp", "image/webp", id));
+            }
+        }
+    }
 
-                    var kuzushiImage = KuzushiImage.FromBytes(
-                        bytes, $"{metadata.Id}.png", "image/png", metadata.Id);
+    private async Task<ParquetReader> OpenReaderAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_embeddingsPath))
+        {
+            throw new FileNotFoundException(
+                "Image embedding Parquet with embedded WebP images is missing.",
+                _embeddingsPath);
+        }
 
-                    globalIndex++;
+        return await ParquetReader
+            .CreateAsync(_embeddingsPath, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+    }
 
-                    yield return (metadata, kuzushiImage);
+    private static async Task<byte[]?> TryLoadImageFromRowGroupAsync(
+        ParquetRowGroupReader rowGroupReader,
+        RequiredFields fields,
+        int rowCount,
+        ImageSelector? selector,
+        string imageId,
+        CancellationToken cancellationToken)
+    {
+        if (selector is not null)
+        {
+            var shards = await ReadStringColumnAsync(rowGroupReader, fields.Shard, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var sourceRowGroups = await ReadInt16ColumnAsync(rowGroupReader, fields.RowGroup, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+            var sourceRows = await ReadInt32ColumnAsync(rowGroupReader, fields.Row, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+
+            for (var row = 0; row < rowCount; row++)
+            {
+                if (string.Equals(shards[row], selector.Shard, StringComparison.Ordinal)
+                    && sourceRowGroups[row] == selector.RowGroup
+                    && sourceRows[row] == selector.Row)
+                {
+                    var webps = await ReadBinaryColumnAsync(rowGroupReader, fields.Webp, rowCount, cancellationToken)
+                        .ConfigureAwait(false);
+                    return webps[row];
                 }
             }
         }
-    }
-
-    private string[] GetParquetFiles()
-    {
-        if (!Directory.Exists(_parquetDir))
+        else if (!string.IsNullOrWhiteSpace(imageId))
         {
-            return Array.Empty<string>();
+            var ids = await ReadStringColumnAsync(rowGroupReader, fields.Id, rowCount, cancellationToken)
+                .ConfigureAwait(false);
+
+            for (var row = 0; row < rowCount; row++)
+            {
+                if (string.Equals(ids[row], imageId, StringComparison.Ordinal))
+                {
+                    var webps = await ReadBinaryColumnAsync(rowGroupReader, fields.Webp, rowCount, cancellationToken)
+                        .ConfigureAwait(false);
+                    return webps[row];
+                }
+            }
         }
 
-        return Directory.EnumerateFiles(_parquetDir, "*.parquet")
-            .OrderBy(f => f)
-            .ToArray();
+        return null;
     }
 
-    private static string BuildShardReference(string shardFileName, int rowGroup, int row)
+    private static RequiredFields GetRequiredFields(ParquetSchema schema)
     {
-        return $"{shardFileName}::{rowGroup}::{row}";
+        var dataFields = schema.GetDataFields();
+
+        return new RequiredFields(
+            RequiredField(dataFields, "id"),
+            RequiredField(dataFields, "label"),
+            RequiredField(dataFields, "shard"),
+            RequiredField(dataFields, "rowGroup"),
+            RequiredField(dataFields, "row"),
+            RequiredField(dataFields, "webp"));
     }
 
-    private (string File, int RowGroup, int Row)? ParseLocalPath(string? localPath)
+    private static DataField RequiredField(DataField[] fields, string name)
     {
-        if (string.IsNullOrEmpty(localPath))
+        return fields.FirstOrDefault(field => field.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException($"Required column '{name}' not found in embedding Parquet.");
+    }
+
+    private static string BuildImageReference(string? shard, short rowGroup, int row)
+    {
+        return $"{shard ?? ""}::{rowGroup}::{row}";
+    }
+
+    private static ImageSelector? TryParseImageReference(string? localPath)
+    {
+        if (string.IsNullOrWhiteSpace(localPath))
         {
             return null;
         }
@@ -205,59 +255,80 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
             return null;
         }
 
-        if (!int.TryParse(parts[1], out var rowGroup) || !int.TryParse(parts[2], out var row))
+        if (!short.TryParse(parts[1], out var rowGroup) || !int.TryParse(parts[2], out var row))
         {
             return null;
         }
 
-        return (Path.GetFileName(parts[0]), rowGroup, row);
+        return new ImageSelector(Path.GetFileName(parts[0].Replace('\\', '/')), rowGroup, row);
     }
 
-    private string ResolveShardPath(string shardFileName)
+    private static async Task<string?[]> ReadStringColumnAsync(
+        ParquetRowGroupReader rowGroupReader,
+        DataField field,
+        int rowCount,
+        CancellationToken cancellationToken)
     {
-        var candidate = Path.GetFullPath(Path.Combine(_parquetDirFullPath, shardFileName));
-        var parquetRoot = _parquetDirFullPath.EndsWith(Path.DirectorySeparatorChar)
-            ? _parquetDirFullPath
-            : _parquetDirFullPath + Path.DirectorySeparatorChar;
-
-        if (!candidate.StartsWith(parquetRoot, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Unsafe dataset shard path: {shardFileName}");
-        }
-
-        return candidate;
-    }
-
-    private static async Task<byte[]> ReadImageBytesAsync(
-        string filePath, int rowGroup, int row, CancellationToken cancellationToken)
-    {
-        await using var fs = File.OpenRead(filePath);
-        await using var reader = await Parquet.ParquetReader
-            .CreateAsync(fs, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        var dataFields = reader.Schema.GetDataFields();
-        var imageField = dataFields.FirstOrDefault(f =>
-            f.Name.Equals("image", StringComparison.OrdinalIgnoreCase))
-            ?? dataFields.FirstOrDefault(f =>
-            f.Name.Equals("bytes", StringComparison.OrdinalIgnoreCase));
-
-        if (imageField is null)
-        {
-            var found = string.Join(", ", dataFields.Select(f => f.Name));
-            throw new InvalidOperationException(
-                $"Column 'image'/'bytes' not found in Parquet file {Path.GetFileName(filePath)}. " +
-                $"Available columns: [{found}]");
-        }
-
-        using var rowGroupReader = reader.OpenRowGroupReader(rowGroup);
-        var rowCount = (int)rowGroupReader.RowCount;
-
-        var imageBytes = new byte[]?[rowCount];
+        var values = new string?[rowCount];
         await rowGroupReader
-            .ReadAsync(imageField, imageBytes.AsMemory(), null, cancellationToken)
+            .ReadAsync(field, values.AsMemory(), null, cancellationToken)
             .ConfigureAwait(false);
 
-        return row < imageBytes.Length ? (imageBytes[row] ?? Array.Empty<byte>()) : Array.Empty<byte>();
+        return values;
     }
+
+    private static async Task<short[]> ReadInt16ColumnAsync(
+        ParquetRowGroupReader rowGroupReader,
+        DataField field,
+        int rowCount,
+        CancellationToken cancellationToken)
+    {
+        var values = new short?[rowCount];
+        await rowGroupReader
+            .ReadAsync(field, values.AsMemory(), null, cancellationToken)
+            .ConfigureAwait(false);
+
+        return values.Select(value => value ?? 0).ToArray();
+    }
+
+    private static async Task<int[]> ReadInt32ColumnAsync(
+        ParquetRowGroupReader rowGroupReader,
+        DataField field,
+        int rowCount,
+        CancellationToken cancellationToken)
+    {
+        var values = new int?[rowCount];
+        await rowGroupReader
+            .ReadAsync(field, values.AsMemory(), null, cancellationToken)
+            .ConfigureAwait(false);
+
+        return values.Select(value => value ?? 0).ToArray();
+    }
+
+    private static async Task<byte[]?[]> ReadBinaryColumnAsync(
+        ParquetRowGroupReader rowGroupReader,
+        DataField field,
+        int rowCount,
+        CancellationToken cancellationToken)
+    {
+        var values = new byte[]?[rowCount];
+        await rowGroupReader
+            .ReadAsync(field, values.AsMemory(), null, cancellationToken)
+            .ConfigureAwait(false);
+
+        return values;
+    }
+
+    private sealed record RequiredFields(
+        DataField Id,
+        DataField Label,
+        DataField Shard,
+        DataField RowGroup,
+        DataField Row,
+        DataField Webp);
+
+    private sealed record ImageSelector(
+        string Shard,
+        short RowGroup,
+        int Row);
 }

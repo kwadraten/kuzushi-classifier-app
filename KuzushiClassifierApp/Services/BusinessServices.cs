@@ -57,8 +57,6 @@ public sealed record BusinessServices(
         var startupController = new StartupController(
             modelAssetService,
             imageLibraryService,
-            imagePreprocessingService,
-            imageEmbeddingService,
             embeddingCacheService,
             embeddingIndexService);
 

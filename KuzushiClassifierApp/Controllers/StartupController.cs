@@ -6,8 +6,6 @@ namespace KuzushiClassifierApp.Controllers;
 public sealed class StartupController(
     IModelAssetService modelAssetService,
     IImageLibraryService imageLibraryService,
-    IImagePreprocessingService imagePreprocessingService,
-    IImageEmbeddingService imageEmbeddingService,
     IEmbeddingCacheService embeddingCacheService,
     IEmbeddingIndexService embeddingIndexService)
 {
@@ -41,11 +39,8 @@ public sealed class StartupController(
 
         if (!CanReuseCache(images, cacheMetadata))
         {
-            await BuildAndPersistEmbeddingsAsync(
-                    images.Count,
-                    progress,
-                    cancellationToken)
-                .ConfigureAwait(false);
+            throw new InvalidOperationException(
+                "The image embedding package is missing or does not match the image metadata.");
         }
 
         progress?.Report(new AssetPreparationProgress(
@@ -65,59 +60,6 @@ public sealed class StartupController(
             assetStatus with { EmbeddingIndexReady = embeddingIndexService.IsReady },
             images.Count,
             embeddingIndexService.Count);
-    }
-
-    private async Task BuildAndPersistEmbeddingsAsync(
-        int totalCount,
-        IProgress<AssetPreparationProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        await embeddingCacheService
-            .SaveAsync(StreamCalculatedEmbeddingsAsync(totalCount, progress, cancellationToken), cancellationToken)
-            .ConfigureAwait(false);
-
-        progress?.Report(new AssetPreparationProgress(
-            AssetPreparationStep.SavingEmbeddingCache,
-            "Saved image embeddings to Parquet.",
-            1,
-            ItemsProcessed: totalCount,
-            TotalItems: totalCount));
-    }
-
-    private async IAsyncEnumerable<DatasetImageEmbedding> StreamCalculatedEmbeddingsAsync(
-        int totalCount,
-        IProgress<AssetPreparationProgress>? progress,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        var index = 0;
-
-        await foreach (var (metadata, kuzushiImage) in imageLibraryService
-            .StreamAllImagesAsync(cancellationToken)
-            .ConfigureAwait(false))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            progress?.Report(new AssetPreparationProgress(
-                AssetPreparationStep.CalculatingEmbeddings,
-                $"Calculating embedding {index + 1} of {totalCount}.",
-                totalCount == 0 ? 1 : (double)index / totalCount,
-                ItemsProcessed: index,
-                TotalItems: totalCount));
-
-            var preparedImage = await imagePreprocessingService
-                .PrepareForModelAsync(kuzushiImage, cancellationToken)
-                .ConfigureAwait(false);
-
-            var embedding = await imageEmbeddingService
-                .EmbedAsync(preparedImage, cancellationToken)
-                .ConfigureAwait(false);
-
-            yield return new DatasetImageEmbedding(
-                metadata,
-                embedding.Vector.ToArray());
-
-            index++;
-        }
     }
 
     private static bool CanReuseCache(

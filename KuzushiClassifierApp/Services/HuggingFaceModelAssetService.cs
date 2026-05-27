@@ -2,7 +2,6 @@ using System.Net.Http;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Text.Json;
 using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Platform;
 using Microsoft.Extensions.Logging;
@@ -16,27 +15,23 @@ public sealed class HuggingFaceModelAssetService :
     IDisposable
 {
     private const string DefaultModelRepo = "kwadraten/shikiji";
-    private const string DefaultDatasetRepo = "kwadraten/hi-utokyo-kuzushi";
     private const string HuggingFaceRawBase = "https://huggingface.co";
     private const string PrebuiltEmbeddingsUrl =
-        "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/image-embeddings.parquet";
+        "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/image-embeddings.with-webp.parquet";
 
     private readonly IAppDataPathProvider _appDataPathProvider;
     private readonly ILogger<HuggingFaceModelAssetService> _logger;
     private readonly HttpClient _httpClient;
     private readonly string _modelRepo;
-    private readonly string _datasetRepo;
 
     public HuggingFaceModelAssetService(
         IAppDataPathProvider appDataPathProvider,
         ILogger<HuggingFaceModelAssetService> logger,
-        string modelRepo = DefaultModelRepo,
-        string datasetRepo = DefaultDatasetRepo)
+        string modelRepo = DefaultModelRepo)
     {
         _appDataPathProvider = appDataPathProvider;
         _logger = logger;
         _modelRepo = modelRepo;
-        _datasetRepo = datasetRepo;
 
         _httpClient = new HttpClient
         {
@@ -61,15 +56,6 @@ public sealed class HuggingFaceModelAssetService :
         "supervised_pretrain_checkpoint.embedding.metadata.json",
     };
 
-    private static readonly string[] DefaultDatasetShardPaths =
-    {
-        "data/train-00000-of-00005.parquet",
-        "data/train-00001-of-00005.parquet",
-        "data/train-00002-of-00005.parquet",
-        "data/train-00003-of-00005.parquet",
-        "data/train-00004-of-00005.parquet",
-    };
-
     public async Task<ModelAssetStatus> PrepareAsync(
         IProgress<AssetPreparationProgress>? progress = null,
         CancellationToken cancellationToken = default)
@@ -78,56 +64,27 @@ public sealed class HuggingFaceModelAssetService :
 
         progress?.Report(new AssetPreparationProgress(
             AssetPreparationStep.CheckingCache,
-            "Checking local dataset shards.",
+            "Checking local image embedding package.",
             0));
 
         var datasetDirectory = _appDataPathProvider.GetDatasetCacheDirectory();
-        var parquetDir = Path.Combine(datasetDirectory, "data");
-        var datasetReady = DatasetShardsReady(parquetDir);
-
-        if (!datasetReady)
-        {
-            progress?.Report(new AssetPreparationProgress(
-                AssetPreparationStep.DownloadingDataset,
-                "Downloading dataset shards from HuggingFace.",
-                0.5));
-
-            await EnsureDatasetShardsAsync(datasetDirectory, progress, cancellationToken)
-                .ConfigureAwait(false);
-
-            datasetReady = DatasetShardsReady(parquetDir);
-
-            if (!datasetReady)
-            {
-                throw new InvalidOperationException(
-                    "Failed to download dataset Parquet shards. " +
-                    $"Ensure the dataset repository '{_datasetRepo}' is public.");
-            }
-        }
-
         var embeddingCacheReady = EmbeddingCacheReady(datasetDirectory);
+
         if (!embeddingCacheReady)
         {
             progress?.Report(new AssetPreparationProgress(
                 AssetPreparationStep.DownloadingDataset,
-                "Downloading prebuilt image embeddings from COS.",
-                0.75));
+                "Downloading image embeddings and WebP images from COS.",
+                0.2));
 
-            try
-            {
-                await EnsurePrebuiltEmbeddingsAsync(datasetDirectory, progress, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-            {
-                _logger.ZLogWarning(ex, $"Could not download prebuilt image embeddings; embeddings will be calculated locally.");
-                progress?.Report(new AssetPreparationProgress(
-                    AssetPreparationStep.DownloadingDataset,
-                    "Could not download prebuilt image embeddings; embeddings will be calculated locally.",
-                    0.75));
-            }
-
+            await EnsurePrebuiltEmbeddingsAsync(datasetDirectory, progress, cancellationToken)
+                .ConfigureAwait(false);
             embeddingCacheReady = EmbeddingCacheReady(datasetDirectory);
+
+            if (!embeddingCacheReady)
+            {
+                throw new InvalidOperationException("Failed to download image-embeddings.with-webp.parquet.");
+            }
         }
 
         var modelDirectory = _appDataPathProvider.GetModelCacheDirectory();
@@ -139,7 +96,7 @@ public sealed class HuggingFaceModelAssetService :
             progress?.Report(new AssetPreparationProgress(
                 AssetPreparationStep.DownloadingModels,
                 "Downloading ONNX model files from HuggingFace.",
-                0.9));
+                0.8));
 
             Directory.CreateDirectory(modelDirectory);
 
@@ -166,7 +123,7 @@ public sealed class HuggingFaceModelAssetService :
         return new ModelAssetStatus(
             ClassifierModelReady: classifierReady,
             EmbeddingModelReady: embeddingReady,
-            DatasetReady: datasetReady,
+            DatasetReady: embeddingCacheReady,
             EmbeddingIndexReady: embeddingCacheReady,
             CacheDirectory: _appDataPathProvider.GetAppDataDirectory());
     }
@@ -215,103 +172,6 @@ public sealed class HuggingFaceModelAssetService :
                     ex);
             }
         }
-    }
-
-    private async Task EnsureDatasetShardsAsync(
-        string datasetDirectory,
-        IProgress<AssetPreparationProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        Directory.CreateDirectory(datasetDirectory);
-
-        var parquetDir = Path.Combine(datasetDirectory, "data");
-        Directory.CreateDirectory(parquetDir);
-
-        var parquetFiles = await ListParquetFilesAsync(cancellationToken).ConfigureAwait(false);
-        if (parquetFiles.Length == 0)
-        {
-            throw new InvalidOperationException(
-                $"No Parquet files found in HuggingFace dataset '{_datasetRepo}'. " +
-                "Please check the dataset repository is public.");
-        }
-
-        for (var i = 0; i < parquetFiles.Length; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var relativePath = parquetFiles[i];
-            var fileName = Path.GetFileName(relativePath);
-            var filePath = Path.Combine(parquetDir, fileName);
-
-            if (File.Exists(filePath) && new FileInfo(filePath).Length > 1024)
-            {
-                continue;
-            }
-
-            var url = $"{HuggingFaceRawBase}/datasets/{_datasetRepo}/resolve/main/{relativePath}";
-
-            await DownloadWithProgressAsync(
-                url,
-                filePath,
-                AssetPreparationStep.DownloadingDataset,
-                $"{fileName} ({i + 1} of {parquetFiles.Length})",
-                progress,
-                cancellationToken)
-                .ConfigureAwait(false);
-        }
-    }
-
-    private async Task<string[]> ListParquetFilesAsync(CancellationToken cancellationToken)
-    {
-        var apiUrl = $"{HuggingFaceRawBase}/api/datasets/{_datasetRepo}";
-
-        try
-        {
-            var json = await _httpClient
-                .GetStringAsync(apiUrl, cancellationToken)
-                .ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-
-            if (doc.RootElement.TryGetProperty("siblings", out var siblings))
-            {
-                var files = new List<string>();
-
-                foreach (var sibling in siblings.EnumerateArray())
-                {
-                    if (!sibling.TryGetProperty("rfilename", out var rfilename))
-                    {
-                        continue;
-                    }
-
-                    var path = rfilename.GetString();
-                    if (path is not null
-                        && path.StartsWith("data/", StringComparison.Ordinal)
-                        && path.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase))
-                    {
-                        files.Add(path);
-                    }
-                }
-
-                if (files.Count > 0)
-                {
-                    return files.Order(StringComparer.Ordinal).ToArray();
-                }
-            }
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.ZLogWarning(ex, $"HTTP request failed while listing Parquet files from API: {apiUrl}");
-        }
-        catch (JsonException ex)
-        {
-            _logger.ZLogWarning(ex, $"JSON parsing failed while listing Parquet files from API: {apiUrl}");
-        }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            _logger.ZLogWarning(ex, $"Task was canceled while listing Parquet files from API: {apiUrl}");
-        }
-
-        return DefaultDatasetShardPaths;
     }
 
     private async Task EnsurePrebuiltEmbeddingsAsync(
@@ -625,16 +485,6 @@ public sealed class HuggingFaceModelAssetService :
             >= 1024 => $"{bytes / 1024.0:F1} KB",
             _ => $"{bytes} B",
         };
-    }
-
-    private static bool DatasetShardsReady(string parquetDir)
-    {
-        return Directory.Exists(parquetDir)
-            && DefaultDatasetShardPaths.All(relativePath =>
-            {
-                var filePath = Path.Combine(parquetDir, Path.GetFileName(relativePath));
-                return File.Exists(filePath) && new FileInfo(filePath).Length > 1024;
-            });
     }
 
     private static bool EmbeddingCacheReady(string datasetDirectory)

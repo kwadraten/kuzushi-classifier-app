@@ -11,7 +11,7 @@ namespace KuzushiClassifierApp.Services;
 
 public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
 {
-    public const string CacheFileName = "image-embeddings.parquet";
+    public const string CacheFileName = "image-embeddings.with-webp.parquet";
 
     private const int CacheVersion = 1;
     private const int DefaultVectorDimensions = 768;
@@ -105,15 +105,21 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
                     rowCount,
                     cancellationToken)
                 .ConfigureAwait(false);
-            var sourceUris = await ReadStringColumnAsync(
+            var shards = await ReadStringColumnAsync(
                     rowGroupReader,
-                    layout.SourceUriField,
+                    layout.ShardField,
                     rowCount,
                     cancellationToken)
                 .ConfigureAwait(false);
-            var localPaths = await ReadStringColumnAsync(
+            var sourceRowGroups = await ReadInt16ColumnAsync(
                     rowGroupReader,
-                    layout.LocalPathField,
+                    layout.RowGroupField,
+                    rowCount,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var sourceRows = await ReadInt32ColumnAsync(
+                    rowGroupReader,
+                    layout.RowField,
                     rowCount,
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -141,7 +147,7 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
                         vector[dimension] = columns[dimension][row];
                     }
 
-                    yield return CreateEmbedding(ids, labels, sourceUris, localPaths, row, vector);
+                    yield return CreateEmbedding(ids, labels, shards, sourceRowGroups, sourceRows, row, vector);
                 }
             }
             else if (layout.FlatVectorField is not null)
@@ -172,7 +178,7 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
                     var vector = new float[dimensions];
                     Array.Copy(flatValues, row * dimensions, vector, 0, dimensions);
 
-                    yield return CreateEmbedding(ids, labels, sourceUris, localPaths, row, vector);
+                    yield return CreateEmbedding(ids, labels, shards, sourceRowGroups, sourceRows, row, vector);
                 }
             }
         }
@@ -182,70 +188,9 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
         IAsyncEnumerable<DatasetImageEmbedding> embeddings,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(embeddings);
-
-        var directory = Path.GetDirectoryName(_cacheFilePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        var tempFilePath = $"{_cacheFilePath}.{Guid.NewGuid():N}.tmp";
-        var schema = CreateScalarVectorSchema(DefaultVectorDimensions);
-
-        try
-        {
-            await using (var stream = File.Create(tempFilePath))
-            {
-                await using var writer = await ParquetWriter
-                    .CreateAsync(
-                        schema,
-                        stream,
-                        new ParquetOptions { CompressionMethod = CompressionMethod.Zstd },
-                        append: false,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-
-                writer.CustomMetadata = new Dictionary<string, string>
-                {
-                    ["version"] = CacheVersion.ToString(),
-                    ["createdAt"] = DateTimeOffset.UtcNow.ToString("O"),
-                    ["vectorDimensions"] = DefaultVectorDimensions.ToString(),
-                };
-
-                var batch = new List<DatasetImageEmbedding>(BatchSize);
-
-                await foreach (var embedding in embeddings
-                    .WithCancellation(cancellationToken)
-                    .ConfigureAwait(false))
-                {
-                    ValidateVector(embedding);
-                    batch.Add(embedding);
-
-                    if (batch.Count >= BatchSize)
-                    {
-                        await WriteBatchAsync(writer, schema, batch, cancellationToken)
-                            .ConfigureAwait(false);
-                        batch.Clear();
-                    }
-                }
-
-                if (batch.Count > 0)
-                {
-                    await WriteBatchAsync(writer, schema, batch, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-            }
-
-            File.Move(tempFilePath, _cacheFilePath, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(tempFilePath))
-            {
-                File.Delete(tempFilePath);
-            }
-        }
+        await Task.CompletedTask.ConfigureAwait(false);
+        throw new NotSupportedException(
+            "The runtime embedding cache must be downloaded as image-embeddings.with-webp.parquet.");
     }
 
     private static async Task WriteBatchAsync(
@@ -293,19 +238,21 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
     private static DatasetImageEmbedding CreateEmbedding(
         IReadOnlyList<string?> ids,
         IReadOnlyList<string?> labels,
-        IReadOnlyList<string?> sourceUris,
-        IReadOnlyList<string?> localPaths,
+        IReadOnlyList<string?> shards,
+        IReadOnlyList<short> rowGroups,
+        IReadOnlyList<int> rows,
         int row,
         float[] vector)
     {
-        var sourceUri = string.IsNullOrWhiteSpace(sourceUris[row]) ? null : sourceUris[row];
-        var localPath = string.IsNullOrWhiteSpace(localPaths[row]) ? null : localPaths[row];
+        var localPath = string.IsNullOrWhiteSpace(shards[row])
+            ? null
+            : $"{shards[row]}::{rowGroups[row]}::{rows[row]}";
 
         return new DatasetImageEmbedding(
             new DatasetImage(
                 ids[row] ?? $"parq_{row:D6}",
                 labels[row] ?? "",
-                sourceUri,
+                SourceUri: null,
                 localPath),
             vector);
     }
@@ -324,6 +271,34 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
         return values;
     }
 
+    private static async Task<short[]> ReadInt16ColumnAsync(
+        ParquetRowGroupReader rowGroupReader,
+        DataField field,
+        int rowCount,
+        CancellationToken cancellationToken)
+    {
+        var values = new short?[rowCount];
+        await rowGroupReader
+            .ReadAsync(field, values.AsMemory(), null, cancellationToken)
+            .ConfigureAwait(false);
+
+        return values.Select(value => value ?? 0).ToArray();
+    }
+
+    private static async Task<int[]> ReadInt32ColumnAsync(
+        ParquetRowGroupReader rowGroupReader,
+        DataField field,
+        int rowCount,
+        CancellationToken cancellationToken)
+    {
+        var values = new int?[rowCount];
+        await rowGroupReader
+            .ReadAsync(field, values.AsMemory(), null, cancellationToken)
+            .ConfigureAwait(false);
+
+        return values.Select(value => value ?? 0).ToArray();
+    }
+
     private static async Task<VectorLayout> GetVectorLayoutAsync(
         ParquetReader reader,
         CancellationToken cancellationToken)
@@ -331,8 +306,9 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
         var dataFields = reader.Schema.GetDataFields();
         var idField = RequiredField(dataFields, "id");
         var labelField = RequiredField(dataFields, "label");
-        var sourceUriField = RequiredField(dataFields, "sourceUri");
-        var localPathField = RequiredField(dataFields, "localPath");
+        var shardField = RequiredField(dataFields, "shard");
+        var rowGroupField = RequiredField(dataFields, "rowGroup");
+        var rowField = RequiredField(dataFields, "row");
 
         var scalarFields = Enumerable
             .Range(0, DefaultVectorDimensions)
@@ -345,8 +321,9 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
             return new VectorLayout(
                 idField,
                 labelField,
-                sourceUriField,
-                localPathField,
+                shardField,
+                rowGroupField,
+                rowField,
                 scalarFields!,
                 null,
                 scalarFields.Length);
@@ -369,8 +346,9 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
         return new VectorLayout(
             idField,
             labelField,
-            sourceUriField,
-            localPathField,
+            shardField,
+            rowGroupField,
+            rowField,
             null,
             flatVectorField,
             dimensions);
@@ -447,8 +425,9 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
     private sealed record VectorLayout(
         DataField IdField,
         DataField LabelField,
-        DataField SourceUriField,
-        DataField LocalPathField,
+        DataField ShardField,
+        DataField RowGroupField,
+        DataField RowField,
         DataField[]? ScalarVectorFields,
         DataField? FlatVectorField,
         int Dimensions);
