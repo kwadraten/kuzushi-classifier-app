@@ -20,7 +20,6 @@
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" />
 
-    <PackageReference Include="DotVector.Core" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
     <PackageReference Include="SixLabors.ImageSharp" />
     <PackageReference Include="Parquet.Net" />

@@ -6,10 +6,12 @@ namespace KuzushiClassifierApp.Services;
 public sealed class StreamingParquetImageLibraryService : IImageLibraryService
 {
     private readonly string _parquetDir;
+    private readonly string _parquetDirFullPath;
 
     public StreamingParquetImageLibraryService(IAppDataPathProvider appDataPathProvider)
     {
         _parquetDir = Path.Combine(appDataPathProvider.GetDatasetCacheDirectory(), "data");
+        _parquetDirFullPath = Path.GetFullPath(_parquetDir);
     }
 
     public async Task<IReadOnlyList<DatasetImage>> LoadImagesAsync(
@@ -69,7 +71,7 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
                         Id: $"parq_{globalIndex:D6}",
                         Label: charValues[row] ?? "",
                         SourceUri: null,
-                        LocalPath: $"{file}::{rgi}::{row}"));
+                        LocalPath: BuildShardReference(fileName, rgi, row)));
                 }
             }
         }
@@ -88,8 +90,9 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
                 $"Cannot resolve image {image.Id} from local path.");
         }
 
+        var shardPath = ResolveShardPath(parsed.Value.File);
         var bytes = await ReadImageBytesAsync(
-            parsed.Value.File, parsed.Value.RowGroup, parsed.Value.Row, cancellationToken)
+            shardPath, parsed.Value.RowGroup, parsed.Value.Row, cancellationToken)
             .ConfigureAwait(false);
 
         return KuzushiImage.FromBytes(bytes, $"{image.Id}.png", "image/png", image.Id);
@@ -152,7 +155,7 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
                         Id: $"parq_{globalIndex:D6}",
                         Label: charValues[row] ?? "",
                         SourceUri: null,
-                        LocalPath: $"{file}::{rgi}::{row}");
+                        LocalPath: BuildShardReference(Path.GetFileName(file), rgi, row));
 
                     var bytes = imageBytes[row];
                     if (bytes is null || bytes.Length == 0)
@@ -184,7 +187,12 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
             .ToArray();
     }
 
-    private static (string File, int RowGroup, int Row)? ParseLocalPath(string? localPath)
+    private static string BuildShardReference(string shardFileName, int rowGroup, int row)
+    {
+        return $"{shardFileName}::{rowGroup}::{row}";
+    }
+
+    private (string File, int RowGroup, int Row)? ParseLocalPath(string? localPath)
     {
         if (string.IsNullOrEmpty(localPath))
         {
@@ -202,7 +210,22 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
             return null;
         }
 
-        return (parts[0], rowGroup, row);
+        return (Path.GetFileName(parts[0]), rowGroup, row);
+    }
+
+    private string ResolveShardPath(string shardFileName)
+    {
+        var candidate = Path.GetFullPath(Path.Combine(_parquetDirFullPath, shardFileName));
+        var parquetRoot = _parquetDirFullPath.EndsWith(Path.DirectorySeparatorChar)
+            ? _parquetDirFullPath
+            : _parquetDirFullPath + Path.DirectorySeparatorChar;
+
+        if (!candidate.StartsWith(parquetRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unsafe dataset shard path: {shardFileName}");
+        }
+
+        return candidate;
     }
 
     private static async Task<byte[]> ReadImageBytesAsync(

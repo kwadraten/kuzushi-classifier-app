@@ -1,5 +1,4 @@
 using System.Net.Http;
-using System.Formats.Tar;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
@@ -17,8 +16,8 @@ public sealed class HuggingFaceModelAssetService :
     private const string DefaultModelRepo = "kwadraten/shikiji";
     private const string DefaultDatasetRepo = "kwadraten/hi-utokyo-kuzushi";
     private const string HuggingFaceRawBase = "https://huggingface.co";
-    private const string PrebuiltIndexUrl =
-        "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/kuzushi-shikiji-webp-dotvector-diskann.tar";
+    private const string PrebuiltEmbeddingsUrl =
+        "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/image-embeddings.parquet";
 
     private readonly IAppDataPathProvider _appDataPathProvider;
     private readonly HttpClient _httpClient;
@@ -72,39 +71,10 @@ public sealed class HuggingFaceModelAssetService :
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var modelDirectory = _appDataPathProvider.GetModelCacheDirectory();
-
         progress?.Report(new AssetPreparationProgress(
             AssetPreparationStep.CheckingCache,
-            "Checking local model files.",
+            "Checking local dataset shards.",
             0));
-
-        var classifierReady = ModelFilesReady(modelDirectory, "supervised_pretrain_checkpoint");
-        var embeddingReady = ModelFilesReady(modelDirectory, "supervised_pretrain_checkpoint.embedding");
-
-        if (!classifierReady || !embeddingReady)
-        {
-            progress?.Report(new AssetPreparationProgress(
-                AssetPreparationStep.DownloadingModels,
-                "Downloading ONNX model files from HuggingFace.",
-                0.1));
-
-            Directory.CreateDirectory(modelDirectory);
-
-            await DownloadModelFilesAsync(modelDirectory, progress, cancellationToken)
-                .ConfigureAwait(false);
-
-            classifierReady = ModelFilesReady(modelDirectory, "supervised_pretrain_checkpoint");
-            embeddingReady = ModelFilesReady(modelDirectory, "supervised_pretrain_checkpoint.embedding");
-
-            if (!classifierReady || !embeddingReady)
-            {
-                throw new InvalidOperationException(
-                    "Failed to download ONNX model files from HuggingFace. " +
-                    $"Please ensure the model repository '{_modelRepo}' exists and is public. " +
-                    $"You can manually place model files in: {modelDirectory}");
-            }
-        }
 
         var datasetDirectory = _appDataPathProvider.GetDatasetCacheDirectory();
         var parquetDir = Path.Combine(datasetDirectory, "data");
@@ -130,21 +100,55 @@ public sealed class HuggingFaceModelAssetService :
             }
         }
 
-        var indexReady = PrebuiltIndexReady(datasetDirectory);
-        if (!indexReady)
+        var embeddingCacheReady = EmbeddingCacheReady(datasetDirectory);
+        if (!embeddingCacheReady)
         {
             progress?.Report(new AssetPreparationProgress(
                 AssetPreparationStep.DownloadingDataset,
-                "Downloading prebuilt DiskANN embedding index.",
+                "Downloading prebuilt image embeddings from COS.",
                 0.75));
 
-            await EnsurePrebuiltIndexAsync(datasetDirectory, progress, cancellationToken)
+            try
+            {
+                await EnsurePrebuiltEmbeddingsAsync(datasetDirectory, progress, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                progress?.Report(new AssetPreparationProgress(
+                    AssetPreparationStep.DownloadingDataset,
+                    "Could not download prebuilt image embeddings; embeddings will be calculated locally.",
+                    0.75));
+            }
+
+            embeddingCacheReady = EmbeddingCacheReady(datasetDirectory);
+        }
+
+        var modelDirectory = _appDataPathProvider.GetModelCacheDirectory();
+        var classifierReady = ModelFilesReady(modelDirectory, "supervised_pretrain_checkpoint");
+        var embeddingReady = ModelFilesReady(modelDirectory, "supervised_pretrain_checkpoint.embedding");
+
+        if (!classifierReady || !embeddingReady)
+        {
+            progress?.Report(new AssetPreparationProgress(
+                AssetPreparationStep.DownloadingModels,
+                "Downloading ONNX model files from HuggingFace.",
+                0.9));
+
+            Directory.CreateDirectory(modelDirectory);
+
+            await DownloadModelFilesAsync(modelDirectory, progress, cancellationToken)
                 .ConfigureAwait(false);
 
-            indexReady = PrebuiltIndexReady(datasetDirectory);
-            if (!indexReady)
+            classifierReady = ModelFilesReady(modelDirectory, "supervised_pretrain_checkpoint");
+            embeddingReady = ModelFilesReady(modelDirectory, "supervised_pretrain_checkpoint.embedding");
+
+            if (!classifierReady || !embeddingReady)
             {
-                throw new InvalidOperationException("Failed to download and unpack the prebuilt DiskANN index.");
+                throw new InvalidOperationException(
+                    "Failed to download ONNX model files from HuggingFace. " +
+                    $"Please ensure the model repository '{_modelRepo}' exists and is public. " +
+                    $"You can manually place model files in: {modelDirectory}");
             }
         }
 
@@ -156,8 +160,8 @@ public sealed class HuggingFaceModelAssetService :
         return new ModelAssetStatus(
             ClassifierModelReady: classifierReady,
             EmbeddingModelReady: embeddingReady,
-            DatasetReady: datasetReady && indexReady,
-            EmbeddingIndexReady: false,
+            DatasetReady: datasetReady,
+            EmbeddingIndexReady: embeddingCacheReady,
             CacheDirectory: _appDataPathProvider.GetAppDataDirectory());
     }
 
@@ -300,39 +304,28 @@ public sealed class HuggingFaceModelAssetService :
         return DefaultDatasetShardPaths;
     }
 
-    private async Task EnsurePrebuiltIndexAsync(
+    private async Task EnsurePrebuiltEmbeddingsAsync(
         string datasetDirectory,
         IProgress<AssetPreparationProgress>? progress,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(datasetDirectory);
 
-        if (PrebuiltIndexReady(datasetDirectory))
+        if (EmbeddingCacheReady(datasetDirectory))
         {
             return;
         }
 
-        var tarPath = Path.Combine(datasetDirectory, "kuzushi-shikiji-webp-dotvector-diskann.tar");
+        var cachePath = Path.Combine(datasetDirectory, ParquetFileEmbeddingCacheService.CacheFileName);
 
         await DownloadWithProgressAsync(
-            PrebuiltIndexUrl,
-            tarPath,
+            PrebuiltEmbeddingsUrl,
+            cachePath,
             AssetPreparationStep.DownloadingDataset,
-            "kuzushi-shikiji-webp-dotvector-diskann.tar",
+            ParquetFileEmbeddingCacheService.CacheFileName,
             progress,
             cancellationToken)
             .ConfigureAwait(false);
-
-        progress?.Report(new AssetPreparationProgress(
-            AssetPreparationStep.LoadingDataset,
-            "Unpacking prebuilt DiskANN index.",
-            0.95));
-
-        ExtractTarToDirectory(tarPath, datasetDirectory, cancellationToken);
-        if (PrebuiltIndexReady(datasetDirectory))
-        {
-            File.Delete(tarPath);
-        }
     }
 
     private async Task DownloadWithProgressAsync(
@@ -620,54 +613,6 @@ public sealed class HuggingFaceModelAssetService :
         };
     }
 
-    private static void ExtractTarToDirectory(
-        string tarPath,
-        string targetDirectory,
-        CancellationToken cancellationToken)
-    {
-        var targetRoot = Path.GetFullPath(targetDirectory);
-        var targetRootWithSeparator = targetRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? targetRoot
-            : targetRoot + Path.DirectorySeparatorChar;
-        Directory.CreateDirectory(targetRoot);
-
-        using var stream = File.OpenRead(tarPath);
-        using var reader = new TarReader(stream);
-
-        while (reader.GetNextEntry() is { } entry)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (string.IsNullOrWhiteSpace(entry.Name))
-            {
-                continue;
-            }
-
-            var normalizedName = entry.Name.Replace('\\', Path.DirectorySeparatorChar);
-            var destinationPath = Path.GetFullPath(Path.Combine(targetRoot, normalizedName));
-
-            if (!destinationPath.Equals(targetRoot, StringComparison.OrdinalIgnoreCase)
-                && !destinationPath.StartsWith(targetRootWithSeparator, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException($"Unsafe tar entry path: {entry.Name}");
-            }
-
-            if (entry.EntryType is TarEntryType.Directory)
-            {
-                Directory.CreateDirectory(destinationPath);
-                continue;
-            }
-
-            var directory = Path.GetDirectoryName(destinationPath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            entry.ExtractToFile(destinationPath, overwrite: true);
-        }
-    }
-
     private static bool DatasetShardsReady(string parquetDir)
     {
         return Directory.Exists(parquetDir)
@@ -678,14 +623,10 @@ public sealed class HuggingFaceModelAssetService :
             });
     }
 
-    private static bool PrebuiltIndexReady(string datasetDirectory)
+    private static bool EmbeddingCacheReady(string datasetDirectory)
     {
-        return File.Exists(Path.Combine(datasetDirectory, "manifest.json"))
-            && Directory.Exists(Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-diskann"))
-            && Directory.EnumerateFiles(
-                Path.Combine(datasetDirectory, "vectors", "dotvector-shikiji-diskann"),
-                "*",
-                SearchOption.AllDirectories).Any(file => new FileInfo(file).Length > 1024);
+        var cachePath = Path.Combine(datasetDirectory, ParquetFileEmbeddingCacheService.CacheFileName);
+        return File.Exists(cachePath) && new FileInfo(cachePath).Length > 1024;
     }
 
     private static bool ModelFilesReady(string modelDirectory, string baseName)

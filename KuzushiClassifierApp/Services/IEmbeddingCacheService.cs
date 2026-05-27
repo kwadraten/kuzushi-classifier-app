@@ -4,10 +4,17 @@ namespace KuzushiClassifierApp.Services;
 
 public interface IEmbeddingCacheService
 {
-    Task<IReadOnlyList<DatasetImageEmbedding>?> TryLoadAsync(
+    Task<EmbeddingCacheMetadata?> TryReadMetadataAsync(
+        CancellationToken cancellationToken = default);
+
+    IAsyncEnumerable<DatasetImageEmbedding> StreamAsync(
         CancellationToken cancellationToken = default);
 
     Task SaveAsync(
-        IReadOnlyList<DatasetImageEmbedding> embeddings,
+        IAsyncEnumerable<DatasetImageEmbedding> embeddings,
         CancellationToken cancellationToken = default);
 }
+
+public sealed record EmbeddingCacheMetadata(
+    int Count,
+    int VectorDimensions);
