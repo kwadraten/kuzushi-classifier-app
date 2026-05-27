@@ -6,16 +6,17 @@ namespace KuzushiClassifierApp.Services;
 
 public sealed class OnnxImageEmbeddingService : IImageEmbeddingService, IDisposable
 {
-    private readonly InferenceSession _session;
-    private readonly OnnxModelMetadata _metadata;
+    private readonly string _modelPath;
+    private readonly string _metadataPath;
+    private InferenceSession? _session;
+    private OnnxModelMetadata? _metadata;
 
     public OnnxImageEmbeddingService(IModelPathProvider modelPathProvider)
     {
         ArgumentNullException.ThrowIfNull(modelPathProvider);
 
-        var metadataPath = Path.ChangeExtension(modelPathProvider.EmbeddingModelPath, ".metadata.json");
-        _metadata = OnnxModelMetadata.Load(metadataPath);
-        _session = new InferenceSession(modelPathProvider.EmbeddingModelPath);
+        _modelPath = modelPathProvider.EmbeddingModelPath;
+        _metadataPath = Path.ChangeExtension(_modelPath, ".metadata.json");
     }
 
     public Task<ImageEmbedding> EmbedAsync(
@@ -25,23 +26,40 @@ public sealed class OnnxImageEmbeddingService : IImageEmbeddingService, IDisposa
         ArgumentNullException.ThrowIfNull(image);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var inputTensor = OnnxImageTensorFactory.CreateInputTensor(image, _metadata.ImageSize);
-        var embedding = Run(inputTensor);
+        var (session, metadata) = EnsureLoaded();
+        var inputTensor = OnnxImageTensorFactory.CreateInputTensor(image, metadata.ImageSize);
+        var embedding = Run(session, metadata, inputTensor);
 
         return Task.FromResult(new ImageEmbedding(Normalize(embedding)));
     }
 
     public void Dispose()
     {
-        _session.Dispose();
+        _session?.Dispose();
     }
 
-    private float[] Run(DenseTensor<float> inputTensor)
+    private (InferenceSession Session, OnnxModelMetadata Metadata) EnsureLoaded()
     {
-        var input = NamedOnnxValue.CreateFromTensor(_metadata.InputName, inputTensor);
-        using var results = _session.Run(new[] { input });
+        if (_session is not null && _metadata is not null)
+        {
+            return (_session, _metadata);
+        }
 
-        var output = results.FirstOrDefault(result => result.Name == _metadata.OutputName)
+        _metadata = OnnxModelMetadata.Load(_metadataPath);
+        _session = new InferenceSession(_modelPath);
+
+        return (_session, _metadata);
+    }
+
+    private static float[] Run(
+        InferenceSession session,
+        OnnxModelMetadata metadata,
+        DenseTensor<float> inputTensor)
+    {
+        var input = NamedOnnxValue.CreateFromTensor(metadata.InputName, inputTensor);
+        using var results = session.Run(new[] { input });
+
+        var output = results.FirstOrDefault(result => result.Name == metadata.OutputName)
             ?? results.First();
 
         return output.AsEnumerable<float>().ToArray();

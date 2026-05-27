@@ -20,7 +20,9 @@ public sealed class AppDataPathProvider : IAppDataPathProvider
         }
         else
         {
-            _appDataRoot = Path.GetFullPath(startDirectory);
+            _appDataRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                AppName);
             _isDevelopment = false;
         }
     }
@@ -29,35 +31,19 @@ public sealed class AppDataPathProvider : IAppDataPathProvider
 
     public string GetAppDataDirectory()
     {
-        string directory;
-        if (_isDevelopment)
-        {
-            directory = Path.Combine(_appDataRoot, "runtime");
-        }
-        else
-        {
-            directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                AppName,
-                "runtime");
-        }
-
+        var directory = _appDataRoot;
         Directory.CreateDirectory(directory);
         return directory;
     }
 
     public string GetModelCacheDirectory()
     {
-        return _isDevelopment
-            ? Path.Combine(_appDataRoot, "models", "shikiji")
-            : Path.Combine(_appDataRoot, "models");
+        return Path.Combine(_appDataRoot, "models");
     }
 
     public string GetDatasetCacheDirectory()
     {
-        return _isDevelopment
-            ? Path.Combine(_appDataRoot, "datasets", "hi-utokyo-kuzushi")
-            : Path.Combine(_appDataRoot, "datasets");
+        return Path.Combine(_appDataRoot, "datasets");
     }
 
     private static string? FindDevDataDirectory(string startDirectory)
