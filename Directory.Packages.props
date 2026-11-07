@@ -23,5 +23,10 @@
     <!-- Logging dependencies -->
     <PackageVersion Include="ZLogger" Version="2.5.4" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.0" />
+
+    <!-- Test dependencies (plugin tests only; all cached versions) -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 </Project>

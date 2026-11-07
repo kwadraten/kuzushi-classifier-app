@@ -3,7 +3,7 @@
 ; Non-commercial use only
 
 #define MyAppName "KuzushiClassifierApp"
-#define MyAppVersion "0.0.1"
+#define MyAppVersion "0.1.0"
 #define MyAppPublisher "kwadraten"
 #define MyAppURL "https://github.com/kwadraten/kuzushi-classifier-app"
 #define MyAppExeName "KuzushiClassifierApp.Desktop.exe"
@@ -33,7 +33,7 @@ DisableProgramGroupPage=yes
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-OutputBaseFilename=mysetup
+OutputBaseFilename=KuzushiClassifierApp-{#MyAppVersion}-win-x64-setup
 SolidCompression=yes
 WizardStyle=modern windows11
 
@@ -44,8 +44,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "D:\code\kuzushi-classifier-app\KuzushiClassifierApp.Desktop\bin\Release\net10.0\win-x64\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\code\kuzushi-classifier-app\KuzushiClassifierApp.Desktop\bin\Release\net10.0\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "KuzushiClassifierApp.Desktop\bin\Release\net10.0\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

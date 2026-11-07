@@ -1,0 +1,74 @@
+# Patchouli development plugin manifest — kwadraten.kuzushi-classifier
+# Static contract: the host must be able to read this file, its referenced
+# schemas and the readme without starting the plugin process.
+
+schema = "patchouli.plugin/1"
+host-api = "patchouli.plugins/1"
+id = "kwadraten.kuzushi-classifier"
+version = "0.1.0"
+name = "Kuzushi Classifier"
+description = "Local ONNX kuzushi (cursive Japanese) single-character classification and dataset similarity lookup. Results are kept in memory for the lifetime of the plugin process only."
+license = "MIT"
+repository = "https://github.com/kwadraten/kuzushi-classifier-app"
+readme = ".agents/plugin-usage.md"
+
+[runtime]
+transport = "stdio"
+command = "KuzushiClassifierApp.Plugin.exe"
+args = []
+
+[library]
+grants = []
+
+[[vfs.nodes]]
+path = ""
+kind = "directory"
+verbs = ["find", "fetch"]
+summary = "Plugin root: status document and the results directory."
+
+[[vfs.nodes]]
+path = "status.json"
+kind = "file"
+verbs = ["fetch"]
+media = "application/json"
+schema = "schemas/status.json"
+
+[[vfs.nodes]]
+path = "results/"
+kind = "directory"
+verbs = ["find"]
+summary = "In-memory action results retained for the lifetime of this plugin process (bounded to 64 entries)."
+
+[[vfs.nodes]]
+path = "results/{result_id}.json"
+kind = "file"
+verbs = ["fetch"]
+media = "application/json"
+schema = "schemas/result.json"
+
+[[vfs.endpoints]]
+path = "control"
+
+[[vfs.endpoints.messages]]
+action = "classify"
+target_types = ["plugin-root"]
+input_schema = "schemas/classify.json"
+result_schema = "schemas/result.json"
+execution_mode = "sync"
+side_effects = "Creates an in-memory result; no library writes or downloads."
+
+[[vfs.endpoints.messages]]
+action = "similar"
+target_types = ["plugin-root"]
+input_schema = "schemas/similar.json"
+result_schema = "schemas/result.json"
+execution_mode = "sync"
+side_effects = "Creates an in-memory result; no library writes or downloads."
+
+[[vfs.endpoints.messages]]
+action = "analyze"
+target_types = ["plugin-root"]
+input_schema = "schemas/analyze.json"
+result_schema = "schemas/result.json"
+execution_mode = "sync"
+side_effects = "Creates an in-memory result; no library writes or downloads."

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kwadraten.dev/kuzushi-classifier/schemas/status.json",
+  "title": "Kuzushi Classifier plugin status",
+  "description": "Readiness of the locally cached assets. The probe never downloads and never initializes model sessions or the similarity index.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plugin_id",
+    "version",
+    "data_root",
+    "downloads_performed",
+    "assets",
+    "capabilities",
+    "missing_assets",
+    "guidance"
+  ],
+  "properties": {
+    "plugin_id": { "const": "kwadraten.kuzushi-classifier" },
+    "version": { "type": "string" },
+    "data_root": { "type": "string" },
+    "downloads_performed": { "const": false },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classifier_model", "embedding_model", "dataset", "embedding_index"],
+      "properties": {
+        "classifier_model": { "$ref": "#/$defs/asset_group" },
+        "embedding_model": { "$ref": "#/$defs/asset_group" },
+        "dataset": { "$ref": "#/$defs/asset_group" },
+        "embedding_index": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ready", "derived_from", "note"],
+          "properties": {
+            "ready": { "type": "boolean" },
+            "derived_from": { "const": "dataset" },
+            "note": { "type": "string" }
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classify", "similar", "analyze"],
+      "properties": {
+        "classify": { "$ref": "#/$defs/capability" },
+        "similar": { "$ref": "#/$defs/capability" },
+        "analyze": { "$ref": "#/$defs/capability" }
+      }
+    },
+    "missing_assets": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "guidance": { "type": "string" }
+  },
+  "$defs": {
+    "asset_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ready", "files"],
+      "properties": {
+        "ready": { "type": "boolean" },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "exists"],
+            "properties": {
+              "path": { "type": "string" },
+              "exists": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ready"],
+      "properties": {
+        "ready": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kwadraten.dev/kuzushi-classifier/schemas/classify.json",
+  "title": "Kuzushi Classifier classify args",
+  "description": "Strict args object accepted by the 'control' endpoint for classify. The image is passed inline as base64; decoded payload must be at most 8 MiB and headers must report at most 8192 px per edge and 16,777,216 total pixels.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image_base64"],
+  "properties": {
+    "image_base64": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "minLength": 1
+    },
+    "media_type": {
+      "enum": ["image/png", "image/jpeg", "image/webp"]
+    },
+    "top_k": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10
+    }
+  }
+}

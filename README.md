@@ -88,6 +88,21 @@ dotnet publish KuzushiClassifierApp.Android/KuzushiClassifierApp.Android.csproj 
 
 ---
 
+## Patchouli 插件
+
+仓库同时提供 `kwadraten.kuzushi-classifier` 独立 stdio MCP 插件。Windows x64 release 包含自包含插件 ZIP 和桌面端安装程序；插件不需要另装 .NET 运行时。
+
+插件执行本机分类、相似样本查询或两者组合，不访问书库、不联网下载，也不写入书库。结果仅保存在插件进程内存中。首次使用前请运行桌面端并准备模型与数据集缓存；缺少文件时，`status.json` 会报告具体缺失项。
+
+```bash
+dotnet test tests/KuzushiClassifierApp.Plugin.Tests/KuzushiClassifierApp.Plugin.Tests.csproj
+pwsh -NoProfile -File scripts/pack-release.ps1 -Version 0.1.0
+```
+
+插件静态契约见 `patchouli-plugin.toml`，调用说明见 `.agents/plugin-usage.md`。发布产物输出到 `.tmp/release/0.1.0/`。
+
+---
+
 ## 日志与诊断系统 (Logging & Diagnostics)
 
 本项目集成了高性能、完全反射零开销（Reflection-free）的 **ZLogger** 结构化日志框架：

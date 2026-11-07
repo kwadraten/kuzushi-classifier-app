@@ -3,5 +3,7 @@
     <Deploy />
   </Project>
   <Project Path="KuzushiClassifierApp.Desktop/KuzushiClassifierApp.Desktop.csproj" />
+  <Project Path="KuzushiClassifierApp.Plugin/KuzushiClassifierApp.Plugin.csproj" />
   <Project Path="KuzushiClassifierApp/KuzushiClassifierApp.csproj" />
+  <Project Path="tests/KuzushiClassifierApp.Plugin.Tests/KuzushiClassifierApp.Plugin.Tests.csproj" />
 </Solution>
