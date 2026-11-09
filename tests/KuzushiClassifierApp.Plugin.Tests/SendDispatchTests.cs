@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 using KuzushiClassifierApp.Models;
+using KuzushiClassifierApp.Services;
+using SkiaSharp;
 using Xunit;
 
 namespace KuzushiClassifierApp.Plugin.Tests;
@@ -198,6 +200,54 @@ public sealed class SendDispatchTests : IDisposable
 
         Assert.Equal(0, _classifier.CallCount);
         await _client.ShutdownAsync();
+    }
+
+    [Theory]
+    [InlineData(SKEncodedImageFormat.Png, "image/png")]
+    [InlineData(SKEncodedImageFormat.Jpeg, "image/jpeg")]
+    [InlineData(SKEncodedImageFormat.Webp, "image/webp")]
+    public void ImageInput_DetectsSupportedFormats(SKEncodedImageFormat format, string mediaType)
+    {
+        var image = PluginImageInput.Parse(TestImages.EncodeBase64(format), null);
+        Assert.Equal(mediaType, image.MediaType);
+        Assert.Equal(mediaType, PluginImageInput.Parse(Convert.ToBase64String(image.Bytes), mediaType).MediaType);
+        Assert.Throws<ToolErrorException>(() =>
+            PluginImageInput.Parse(Convert.ToBase64String(image.Bytes), "image/png" == mediaType ? "image/jpeg" : "image/png"));
+    }
+
+    [Fact]
+    public void ImageInput_RejectsUnsupportedEncodedFormat()
+    {
+        var gif = "R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+        using var codec = SKCodec.Create(SKData.CreateCopy(Convert.FromBase64String(gif)));
+        Assert.Equal(SKEncodedImageFormat.Gif, codec.EncodedFormat);
+        Assert.Throws<ToolErrorException>(() =>
+            PluginImageInput.Parse(gif, null));
+    }
+
+    [Fact]
+    public void ImageTensor_ResizesAndNormalizesRgb()
+    {
+        var image = KuzushiImage.FromBytes(Convert.FromBase64String(TestImages.PngBase64(1, 1)));
+        var tensor = OnnxImageTensorFactory.CreateInputTensor(image, 2);
+        Assert.Equal(new[] { 1, 3, 2, 2 }, tensor.Dimensions.ToArray());
+        for (var y = 0; y < 2; y++)
+        for (var x = 0; x < 2; x++)
+        {
+            Assert.Equal(0f, tensor[0, 0, y, x]);
+            Assert.Equal(0f, tensor[0, 1, y, x]);
+            Assert.Equal(128f / 255f, tensor[0, 2, y, x]);
+        }
+    }
+
+    [Theory]
+    [InlineData(SKEncodedImageFormat.Jpeg)]
+    [InlineData(SKEncodedImageFormat.Webp)]
+    public void ImageTensor_DecodesSupportedFormats(SKEncodedImageFormat format)
+    {
+        var image = KuzushiImage.FromBytes(Convert.FromBase64String(TestImages.EncodeBase64(format, 1, 1)));
+        var tensor = OnnxImageTensorFactory.CreateInputTensor(image, 2);
+        Assert.InRange(tensor[0, 2, 0, 0], 0.4f, 0.6f);
     }
 
     [Fact]

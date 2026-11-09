@@ -2,8 +2,7 @@ using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Platform;
 using KuzushiClassifierApp.Plugin;
 using KuzushiClassifierApp.Services;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using SkiaSharp;
 
 namespace KuzushiClassifierApp.Plugin.Tests;
 
@@ -166,23 +165,21 @@ internal static class TestImages
 {
     /// <summary>A small valid PNG generated in memory.</summary>
     public static string PngBase64(int width = 64, int height = 64)
-    {
-        using var image = new Image<Rgba32>(width, height);
-        image.ProcessPixelRows(accessor =>
-        {
-            for (var y = 0; y < accessor.Height; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (var x = 0; x < row.Length; x++)
-                {
-                    row[x] = new Rgba32((byte)x, (byte)y, 128, 255);
-                }
-            }
-        });
+        => EncodeBase64(SKEncodedImageFormat.Png, width, height);
 
-        using var stream = new MemoryStream();
-        image.SaveAsPng(stream);
-        return Convert.ToBase64String(stream.ToArray());
+    public static string EncodeBase64(SKEncodedImageFormat format, int width = 64, int height = 64)
+    {
+        using var image = new SKBitmap(width, height);
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                image.SetPixel(x, y, new SKColor((byte)x, (byte)y, 128));
+            }
+        }
+
+        using var encoded = image.Encode(format, 100);
+        return Convert.ToBase64String(encoded.ToArray());
     }
 
     /// <summary>

@@ -21,7 +21,8 @@
     <PackageReference Include="CommunityToolkit.Mvvm" />
 
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
-    <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
     <PackageReference Include="Parquet.Net" />
     
     <!-- Logging dependencies -->

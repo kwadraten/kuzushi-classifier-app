@@ -42,6 +42,7 @@ KuzushiClassifierApp.Plugin.exe [--data-root <path>]
 | `status.json` | readiness per asset group + capability (`schemas/status.json`) |
 | `results/{result_id}.json` | immutable result (`schemas/result.json`); `NOT_FOUND` after restart/eviction |
 | `results/` | `UNSUPPORTED_OPERATION` (find only) |
+| `ui/main.html` | self-contained HTML document (`text/html`) backing the `main` view |
 
 Traversal (`..`), percent escapes, query/fragment, OS paths and foreign
 `patchouli://` namespaces are rejected with `INVALID_ARGUMENT`.
@@ -78,3 +79,26 @@ candidates, similar_images}}`. Errors: `isError=true` with
 
 `notifications/cancelled` with `params.requestId` cancels an in-flight
 request; a clean stdin EOF drains pending requests and exits.
+
+## Views
+
+`patchouli-plugin.toml` declares one `[[ui.views]]` descriptor:
+
+| field | value |
+| --- | --- |
+| `id` | `main` |
+| `title` | `本地崩字识别` |
+| `placement` | `window` (the host shows it in a standalone popup container) |
+| `source` | `ui/main.html` (a `vfs.nodes` file node, `fetch` verb, `media = "text/html"`) |
+
+The host composes `patchouli://plugin/kwadraten.kuzushi-classifier/views/main`
+and loads the `source` document through `patchouli.plugin.fetch` with
+`uri = "ui/main.html"`; the plugin returns
+`{uri, content_type: "text/html", content}` where `content` is the complete
+HTML string. The document is embedded in the plugin assembly
+(`KuzushiClassifierApp.Plugin.Views.main.html`), so packaged zips need no
+sidecar file, and it is fully self-contained under the host view CSP (inline
+CSS/JS only, `img-src data:`, `connect-src 'none'`). It mirrors the
+standalone app's MainView chrome as a display shell — the predict action is
+not wired to inference; classify/similar/analyze remain available via
+`patchouli.plugin.send`.

@@ -150,6 +150,21 @@ public sealed class FindFetchTests : IDisposable
     }
 
     [Fact]
+    public async Task Fetch_MainView_ReturnsEmbeddedHtml()
+    {
+        var response = await _client.RequestAsync(McpMessages.Fetch(14, "ui/main.html"));
+        var content = McpAssertions.AssertToolSuccess(response);
+
+        Assert.Equal("ui/main.html", content["uri"]!.GetValue<string>());
+        Assert.Equal("text/html", content["content_type"]!.GetValue<string>());
+
+        var html = content["content"]!.GetValue<string>();
+        Assert.Contains("<html", html);
+        Assert.Contains("本地崩字识别", html);
+        await _client.ShutdownAsync();
+    }
+
+    [Fact]
     public async Task Fetch_MissingResult_NotFound()
     {
         var response = await _client.RequestAsync(McpMessages.Fetch(13, "results/r_missing.json"));

@@ -5,7 +5,7 @@
 schema = "patchouli.plugin/1"
 host-api = "patchouli.plugins/1"
 id = "kwadraten.kuzushi-classifier"
-version = "0.1.0"
+version = "0.2.0"
 name = "Kuzushi Classifier"
 description = "Local ONNX kuzushi (cursive Japanese) single-character classification and dataset similarity lookup. Results are kept in memory for the lifetime of the plugin process only."
 license = "MIT"
@@ -46,6 +46,12 @@ verbs = ["fetch"]
 media = "application/json"
 schema = "schemas/result.json"
 
+[[vfs.nodes]]
+path = "ui/main.html"
+kind = "file"
+verbs = ["fetch"]
+media = "text/html"
+
 [[vfs.endpoints]]
 path = "control"
 
@@ -72,3 +78,9 @@ input_schema = "schemas/analyze.json"
 result_schema = "schemas/result.json"
 execution_mode = "sync"
 side_effects = "Creates an in-memory result; no library writes or downloads."
+
+[[ui.views]]
+id = "main"
+title = "本地崩字识别"
+placement = "window"
+source = "ui/main.html"

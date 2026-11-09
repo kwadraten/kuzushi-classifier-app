@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本地崩字识别</title>
+<style>
+  /* Palette mirrors KuzushiClassifierApp/App.axaml (light, fixed). */
+  :root {
+    --brand-blue: #005FAA;
+    --primary-container: #0078D4;
+    --surface: #FDF8F6;
+    --surface-low: #F7F3F1;
+    --surface-container: #F1EDEB;
+    --surface-container-highest: #E6E2E0;
+    --on-surface: #1C1B1B;
+    --on-surface-variant: #404752;
+    --outline: #717783;
+    --outline-variant: #C0C7D4;
+    --success: #107C10;
+    --success-bg: #E1F4E1;
+    --ready-dot: #008000; /* Brushes.Green used by the AXAML status ellipses */
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Source Han Sans SC", sans-serif;
+    background: var(--surface);
+    color: var(--on-surface);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- 1. Top AppBar (64px, white, bottom border) ---------- */
+  .appbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    height: 64px;
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--outline-variant);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+  }
+
+  .brand { display: flex; align-items: center; gap: 12px; }
+
+  .brand-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--brand-blue);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+
+  .brand-icon svg { width: 20px; height: 20px; fill: #FFFFFF; }
+
+  .brand-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--on-surface);
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .pill {
+    border-radius: 12px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .pill-success { background: var(--success-bg); color: var(--success); margin-left: 8px; }
+
+  .status-group { display: flex; align-items: center; gap: 16px; }
+
+  .status-item { display: flex; align-items: center; gap: 6px; }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ready-dot);
+    flex: none;
+  }
+
+  .status-text {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--on-surface-variant);
+    white-space: nowrap;
+  }
+
+  /* ---------- 2. Scrollable content, two equal columns ---------- */
+  .content { padding: 24px; }
+
+  .columns { display: grid; grid-template-columns: 1fr 1fr; }
+
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .col-left  { margin-right: 12px; }
+  .col-right { margin-left: 12px; }
+
+  @media (max-width: 759px) {
+    .columns { grid-template-columns: 1fr; }
+    .col-left  { margin: 0 0 16px 0; }
+    .col-right { margin: 0; }
+  }
+
+  /* ---------- Border.Card style ---------- */
+  .card {
+    background: #FFFFFF;
+    border: 1px solid var(--outline-variant);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.04);
+  }
+
+  .card-stack { display: flex; flex-direction: column; gap: 16px; }
+  .card-stack-tight { display: flex; flex-direction: column; gap: 8px; }
+
+  .card-title-16 { font-size: 16px; font-weight: 700; color: var(--on-surface); margin: 0; }
+  .card-title-18 { font-size: 18px; font-weight: 700; color: var(--on-surface); margin: 0; }
+
+  /* ---------- Segmented control ---------- */
+  .seg {
+    background: var(--surface-container);
+    border-radius: 8px;
+    padding: 4px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .seg button {
+    height: 36px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--on-surface-variant);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .seg button.active { background: #FFFFFF; color: var(--brand-blue); }
+
+  /* ---------- Buttons ---------- */
+  .btn-secondary {
+    background: #FFFFFF;
+    color: var(--on-surface-variant);
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform 0.075s, background 0.15s;
+  }
+
+  .btn-secondary:hover { background: var(--surface-low); }
+  .btn-secondary:active { transform: scale(0.97); }
+
+  .btn-primary {
+    height: 54px;
+    width: 100%;
+    background: var(--brand-blue);
+    color: #FFFFFF;
+    border: 0;
+    border-radius: 8px;
+    font: inherit;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.075s, background 0.15s;
+  }
+
+  .btn-primary:hover { background: var(--primary-container); }
+  .btn-primary:active { transform: scale(0.97); }
+  .btn-primary svg { width: 18px; height: 18px; fill: #FFFFFF; margin-right: 10px; flex: none; }
+
+  /* ---------- Upload dropzone ---------- */
+  .dropzone {
+    position: relative;
+    height: 240px;
+    border-radius: 8px;
+    background: var(--surface-low);
+    border: 2px dashed var(--outline-variant);
+    cursor: pointer;
+    overflow: hidden;
+  }
+
+  .dropzone-inner {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    text-align: center;
+    padding: 0 16px;
+  }
+
+  .upload-circle {
+    width: 56px;
+    height: 56px;
+    border-radius: 28px;
+    background: #E3F2FD;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .upload-circle svg { width: 28px; height: 28px; fill: var(--brand-blue); }
+
+  .dropzone-primary { font-size: 15px; font-weight: 600; color: var(--on-surface); }
+  .dropzone-secondary { font-size: 12px; color: var(--on-surface-variant); }
+  .dropzone-inner .btn-secondary { width: 140px; margin-top: 8px; }
+
+  .preview-overlay {
+    position: absolute;
+    inset: 12px;
+    background: #FFFFFF;
+    border: 1px solid var(--outline-variant);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .preview-overlay img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 8px;
+  }
+
+  .preview-overlay .btn-secondary {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+  }
+
+  /* ---------- Handwriting canvas ---------- */
+  .handwrite { display: flex; flex-direction: column; align-items: center; }
+
+  .hw-frame {
+    width: 224px;
+    height: 224px;
+    border: 2px solid var(--outline);
+    border-radius: 8px;
+    background: #FFFFFF;
+    position: relative;
+    overflow: hidden;
+    flex: none;
+  }
+
+  .hw-guides { position: absolute; inset: 0; pointer-events: none; }
+
+  .hw-canvas {
+    position: absolute;
+    inset: 0;
+    width: 224px;
+    height: 224px;
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  .hw-bar {
+    width: 224px;
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .hw-hint { font-size: 12px; color: var(--outline-variant); }
+
+  .hw-reset { padding: 4px 8px; display: inline-flex; align-items: center; gap: 6px; }
+  .hw-reset svg { width: 12px; height: 12px; fill: var(--on-surface-variant); }
+  .hw-reset span { font-size: 11px; }
+
+  /* ---------- Prep card ---------- */
+  .prep-status { font-size: 13px; color: var(--on-surface-variant); }
+
+  .progress {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--surface-container-highest);
+    overflow: hidden;
+  }
+
+  .progress-fill { height: 100%; background: var(--brand-blue); border-radius: 4px; }
+
+  .analysis-note {
+    font-size: 12px;
+    color: var(--on-surface-variant);
+    text-align: center;
+    margin: 0;
+  }
+
+  /* ---------- Right column ---------- */
+  .card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+  .pill-primary { background: var(--primary-container); color: #FFFFFF; font-weight: 700; padding: 4px 10px; }
+
+  .empty-state {
+    flex: 1;
+    min-height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--on-surface-variant);
+  }
+
+  .empty-state-tall { min-height: 120px; }
+
+  .results-card { min-height: 220px; display: flex; flex-direction: column; }
+  .similar-card { min-height: 260px; display: flex; flex-direction: column; }
+  .results-card .card-stack, .similar-card .card-stack { flex: 1; }
+
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- 1. Top AppBar -->
+<header class="appbar">
+  <div class="brand">
+    <div class="brand-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M19,3H5C3.9,3 3,3.9 3,5V19C3,20.1 3.9,21 5,21H19C20.1,21 21,20.1 21,19V5C21,3.9 20.1,3 19,3M9,17H7V10H9V17M13,17H11V7H13V17M17,17H15V13H17V17Z"/></svg>
+    </div>
+    <h1 class="brand-title">本地崩字识别</h1>
+    <span class="pill pill-success">Vision Analytics</span>
+  </div>
+  <div class="status-group">
+    <div class="status-item" title="Classifier ONNX Model Status">
+      <span class="status-dot"></span>
+      <span class="status-text">模型已就绪</span>
+    </div>
+    <div class="status-item" title="Indexed database items status">
+      <span class="status-dot"></span>
+      <span class="status-text">索引库已加载</span>
+    </div>
+  </div>
+</header>
+
+<!-- 2. Main content -->
+<main class="content">
+  <div class="columns">
+
+    <!-- LEFT: input source + prep + predict -->
+    <section class="col col-left">
+
+      <!-- A. Input source card -->
+      <div class="card">
+        <div class="card-stack">
+          <h2 class="card-title-16">单字输入源</h2>
+
+          <div class="seg" role="tablist">
+            <button type="button" id="tabUpload" class="active" role="tab" aria-selected="true">图片上传</button>
+            <button type="button" id="tabDraw" role="tab" aria-selected="false">手写输入</button>
+          </div>
+
+          <!-- TAB 0: upload dropzone -->
+          <div id="paneUpload">
+            <div class="dropzone" id="dropzone">
+              <div class="dropzone-inner">
+                <div class="upload-circle" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M9,16h6v-6h4l-7-7-7,7h4V16z M5,18h14v2H5V18z"/></svg>
+                </div>
+                <div class="dropzone-primary">拖拽单字图像至此，或点击上传</div>
+                <div class="dropzone-secondary">支持 JPG, PNG, HEIC 格式</div>
+                <button type="button" class="btn-secondary" id="pickFile">选择本地文件</button>
+              </div>
+              <div class="preview-overlay" id="previewOverlay" hidden>
+                <img id="previewImage" alt="已选择的单字图像预览">
+                <button type="button" class="btn-secondary" id="clearImage">清除</button>
+              </div>
+            </div>
+            <input type="file" id="fileInput" accept="image/*" hidden>
+          </div>
+
+          <!-- TAB 1: handwriting canvas -->
+          <div id="paneDraw" hidden>
+            <div class="handwrite">
+              <div class="hw-frame">
+                <svg class="hw-guides" viewBox="0 0 224 224" aria-hidden="true">
+                  <line x1="0" y1="112" x2="224" y2="112" stroke="#C0C7D4" stroke-width="1.5" stroke-dasharray="4,4"/>
+                  <line x1="112" y1="0" x2="112" y2="224" stroke="#C0C7D4" stroke-width="1.5" stroke-dasharray="4,4"/>
+                </svg>
+                <canvas class="hw-canvas" id="hwCanvas" width="224" height="224"></canvas>
+              </div>
+              <div class="hw-bar">
+                <span class="hw-hint">在此手写书写字形</span>
+                <button type="button" class="btn-secondary hw-reset" id="hwReset">
+                  <svg viewBox="0 0 24 24"><path d="M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2,-0.9 2,-2V7H6V19z M19,4h-3.5l-1,-1h-5l-1,1H5v2h14V4z"/></svg>
+                  <span>重置</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- B. Prep card — visible only before initialization; this static view
+           renders the initialized state, so the card stays dormant. -->
+      <div class="card" hidden>
+        <div class="card-stack" style="gap:12px">
+          <h2 class="card-title-16" style="font-size:14px">应用资源准备</h2>
+          <div class="prep-status">正在启动应用...</div>
+          <div class="progress"><div class="progress-fill" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <!-- C. Predict action card -->
+      <div class="card">
+        <div class="card-stack-tight">
+          <button type="button" class="btn-primary" id="predictButton">
+            <svg viewBox="0 0 24 24"><path d="M19,9l1.25-2.75L23,5l-2.75-1.25L19,1l-1.25,2.75L15,5l2.75,1.25L19,9z M11.5,9.5L9,4L6.5,9.5L1,12l5.5,2.5L9,20l2.5-5.5L17,12L11.5,9.5z M19,15l-1.25,2.75L15,19l2.75,1.25L19,22l1.25-2.75L23,19l-2.75-1.25L19,15z"/></svg>
+            <span>开始识别预测</span>
+          </button>
+          <p class="analysis-note">分析过程通常在 2 秒内完成。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: predictions + similar samples -->
+    <section class="col col-right">
+
+      <!-- A. Top-10 predictions -->
+      <div class="card results-card">
+        <div class="card-stack">
+          <div class="card-header">
+            <h2 class="card-title-18">单字识别预测</h2>
+            <span class="pill pill-primary">TOP 10 候选</span>
+          </div>
+          <div class="empty-state">
+            暂无识别数据。请在左侧上传图像或手写汉字后，点击【开始识别预测】
+          </div>
+        </div>
+      </div>
+
+      <!-- B. Similar samples gallery -->
+      <div class="card similar-card">
+        <div class="card-stack">
+          <h2 class="card-title-18">相似样本库匹配</h2>
+          <div class="empty-state empty-state-tall">
+            暂无相似样本。识别预测完成后，在此展示从字形库中检索到的 top-10 最相似字形
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---- Segmented tab switching (mirrors ActiveTab 0=upload, 1=handwriting) ---- */
+  var tabUpload = document.getElementById("tabUpload");
+  var tabDraw = document.getElementById("tabDraw");
+  var paneUpload = document.getElementById("paneUpload");
+  var paneDraw = document.getElementById("paneDraw");
+
+  function selectTab(index) {
+    var upload = index === 0;
+    tabUpload.classList.toggle("active", upload);
+    tabDraw.classList.toggle("active", !upload);
+    tabUpload.setAttribute("aria-selected", upload ? "true" : "false");
+    tabDraw.setAttribute("aria-selected", upload ? "false" : "true");
+    paneUpload.hidden = !upload;
+    paneDraw.hidden = upload;
+  }
+
+  tabUpload.addEventListener("click", function () { selectTab(0); });
+  tabDraw.addEventListener("click", function () { selectTab(1); });
+
+  /* ---- Upload pane: file pick / drag-drop preview overlay ---- */
+  var dropzone = document.getElementById("dropzone");
+  var fileInput = document.getElementById("fileInput");
+  var previewOverlay = document.getElementById("previewOverlay");
+  var previewImage = document.getElementById("previewImage");
+  var clearImage = document.getElementById("clearImage");
+
+  function openPicker() { fileInput.click(); }
+
+  function showPreview(file) {
+    if (!file || !file.type || file.type.indexOf("image/") !== 0) { return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      previewImage.src = String(reader.result);
+      previewOverlay.hidden = false;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function resetPreview() {
+    previewImage.removeAttribute("src");
+    previewOverlay.hidden = true;
+    fileInput.value = "";
+  }
+
+  document.getElementById("pickFile").addEventListener("click", function (e) {
+    e.stopPropagation();
+    openPicker();
+  });
+  dropzone.addEventListener("click", openPicker);
+  clearImage.addEventListener("click", function (e) {
+    e.stopPropagation();
+    resetPreview();
+  });
+  fileInput.addEventListener("change", function () {
+    showPreview(fileInput.files && fileInput.files[0]);
+  });
+  dropzone.addEventListener("dragover", function (e) {
+    e.preventDefault();
+    if (e.dataTransfer) { e.dataTransfer.dropEffect = "copy"; }
+  });
+  dropzone.addEventListener("drop", function (e) {
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      showPreview(e.dataTransfer.files[0]);
+    }
+  });
+
+  /* ---- Handwriting canvas: 8px round black strokes (matches AXAML Line) ---- */
+  var canvas = document.getElementById("hwCanvas");
+  var ctx = canvas.getContext("2d");
+  var dpr = window.devicePixelRatio || 1;
+  if (dpr !== 1) {
+    canvas.width = 224 * dpr;
+    canvas.height = 224 * dpr;
+    ctx.scale(dpr, dpr);
+  }
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 8;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  var drawing = false;
+  var last = null;
+
+  function canvasPoint(e) {
+    var rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (224 / rect.width),
+      y: (e.clientY - rect.top) * (224 / rect.height)
+    };
+  }
+
+  canvas.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0) { return; }
+    drawing = true;
+    last = canvasPoint(e);
+    try { canvas.setPointerCapture(e.pointerId); } catch (ignore) { /* capture is a nicety */ }
+    e.preventDefault();
+  });
+
+  canvas.addEventListener("pointermove", function (e) {
+    if (!drawing || !last) { return; }
+    var point = canvasPoint(e);
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+    last = point;
+    e.preventDefault();
+  });
+
+  function endStroke() {
+    drawing = false;
+    last = null;
+  }
+
+  canvas.addEventListener("pointerup", endStroke);
+  canvas.addEventListener("pointercancel", endStroke);
+
+  document.getElementById("hwReset").addEventListener("click", function () {
+    ctx.clearRect(0, 0, 224, 224);
+  });
+})();
+</script>
+</body>
+</html>

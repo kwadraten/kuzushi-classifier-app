@@ -14,7 +14,13 @@
   <ItemGroup>
     <ProjectReference Include="..\KuzushiClassifierApp\KuzushiClassifierApp.csproj" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
-    <PackageReference Include="SixLabors.ImageSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Plugin view documents ship inside the assembly: the packaged plugin
+         zip must not depend on loose files next to the executable. The
+         LogicalName is referenced by PluginViewAssets. -->
+    <EmbeddedResource Include="Views\main.html" LogicalName="KuzushiClassifierApp.Plugin.Views.main.html" />
   </ItemGroup>
 
   <ItemGroup>

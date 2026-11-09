@@ -1,5 +1,5 @@
 using KuzushiClassifierApp.Models;
-using SixLabors.ImageSharp;
+using SkiaSharp;
 
 namespace KuzushiClassifierApp.Plugin;
 
@@ -75,30 +75,24 @@ public static class PluginImageInput
                 $"Decoded image is {bytes.Length} bytes; the limit is {MaxDecodedBytes} (8 MiB).");
         }
 
-        ImageInfo? info;
-        try
+        using var data = SKData.CreateCopy(bytes);
+        using var codec = SKCodec.Create(data);
+        var detectedMediaType = codec?.EncodedFormat switch
         {
-            info = Image.Identify(bytes);
-        }
-        catch (Exception ex) when (ex is UnknownImageFormatException
-            or InvalidImageContentException
-            or NotSupportedException)
-        {
-            throw new ToolErrorException(
-                ToolErrorCodes.InvalidArgument,
-                "Decoded bytes are not a recognized image (png, jpeg or webp).",
-                ex);
-        }
-
-        if (info is null)
+            SKEncodedImageFormat.Png => "image/png",
+            SKEncodedImageFormat.Jpeg => "image/jpeg",
+            SKEncodedImageFormat.Webp => "image/webp",
+            _ => null,
+        };
+        if (detectedMediaType is null)
         {
             throw new ToolErrorException(
                 ToolErrorCodes.InvalidArgument,
                 "Decoded bytes are not a recognized image (png, jpeg or webp).");
         }
 
-        var width = info.Width;
-        var height = info.Height;
+        var width = codec!.Info.Width;
+        var height = codec.Info.Height;
         if (width <= 0 || height <= 0
             || width > MaxEdgePixels
             || height > MaxEdgePixels
@@ -110,9 +104,7 @@ public static class PluginImageInput
                 $"(max {MaxEdgePixels} px per edge, max {MaxTotalPixels} total pixels).");
         }
 
-        var detectedMediaType = info.Metadata.DecodedImageFormat?.DefaultMimeType;
         if (declaredMediaType is not null
-            && detectedMediaType is not null
             && !string.Equals(declaredMediaType, detectedMediaType, StringComparison.Ordinal))
         {
             throw new ToolErrorException(
@@ -123,6 +115,6 @@ public static class PluginImageInput
         return KuzushiImage.FromBytes(
             bytes,
             fileName: "input",
-            mediaType: detectedMediaType ?? declaredMediaType ?? "application/octet-stream");
+            mediaType: detectedMediaType);
     }
 }

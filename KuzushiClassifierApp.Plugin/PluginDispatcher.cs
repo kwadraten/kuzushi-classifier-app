@@ -170,6 +170,17 @@ public sealed class PluginDispatcher
         var uri = GetRequiredString(arguments, "uri");
         var path = NormalizeRelativePath(uri);
 
+        // ui.views sources are raw documents, not JSON payloads.
+        if (path == PluginViewAssets.MainViewPath)
+        {
+            return Task.FromResult(new JsonObject
+            {
+                ["uri"] = path,
+                ["content_type"] = "text/html",
+                ["content"] = PluginViewAssets.MainViewHtml,
+            });
+        }
+
         JsonObject payload = path switch
         {
             "" => DirectoryDocument(),
