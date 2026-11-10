@@ -1,11 +1,11 @@
-# Patchouli development plugin manifest 鈥?kwadraten.kuzushi-classifier
+# Patchouli development plugin manifest — kwadraten.kuzushi-classifier
 # Static contract: the host must be able to read this file, its referenced
 # schemas and the readme without starting the plugin process.
 
 schema = "patchouli.plugin/1"
 host-api = "patchouli.plugins/1"
 id = "kwadraten.kuzushi-classifier"
-version = "0.3.0"
+version = "0.3.1"
 name = "Kuzushi Classifier"
 description = "Local ONNX kuzushi (cursive Japanese) single-character classification and dataset similarity lookup. Results are kept in memory for the lifetime of the plugin process only."
 license = "MIT"
@@ -117,7 +117,7 @@ target_types = ["plugin-root"]
 input_schema = "schemas/prepare-assets.json"
 result_schema = "schemas/preparation.json"
 execution_mode = "sync"
-side_effects = "Starts the single background preparation job and returns its snapshot. allow_download is retained for host/UI orchestration compatibility only: the plugin never downloads 鈥?missing declared [[files]] return needs_download and must be fetched through the host's managed-files surface; present files are loaded locally (ONNX sessions, dataset, similarity index)."
+side_effects = "Starts the single background preparation job and returns its snapshot. allow_download is retained for host/UI orchestration compatibility only: the plugin never downloads — missing declared [[files]] return needs_download and must be fetched through the host's managed-files surface; present files are loaded locally (ONNX sessions, dataset, similarity index)."
 
 [[vfs.endpoints.messages]]
 action = "cancel_preparation"
@@ -129,6 +129,6 @@ side_effects = "Cancels the in-flight preparation job; a later prepare_assets ma
 
 [[ui.views]]
 id = "main"
-title = "鏈湴宕╁瓧璇嗗埆"
+title = "本地崩字识别"
 placement = "window"
 source = "ui/main.html"

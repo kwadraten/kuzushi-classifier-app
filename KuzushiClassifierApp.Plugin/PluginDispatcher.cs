@@ -13,7 +13,7 @@ namespace KuzushiClassifierApp.Plugin;
 public sealed class PluginDispatcher
 {
     public const string PluginId = "kwadraten.kuzushi-classifier";
-    public const string PluginVersion = "0.3.0";
+    public const string PluginVersion = "0.3.1";
     public const string PluginRootUri = "patchouli://plugin/" + PluginId + "/";
 
     private const int DefaultLimit = 20;
@@ -278,14 +278,14 @@ public sealed class PluginDispatcher
             },
             ["assets"] = new JsonObject
             {
-                // File entries carry the manifest-declared relative paths only 鈥?
+                // File entries carry the manifest-declared relative paths only —
                 // resolved absolute locations are internal to the plugin process.
                 ["classifier_model"] = report.Classifier.ToJson(),
                 ["embedding_model"] = report.Embedding.ToJson(),
                 ["dataset"] = report.Dataset.ToJson(),
                 ["embedding_index"] = new JsonObject
                 {
-                    // Actual runtime index state 鈥?file existence alone proves nothing.
+                    // Actual runtime index state — file existence alone proves nothing.
                     ["ready"] = _inference.IndexReady,
                     ["derived_from"] = "dataset",
                     ["note"] = "The streaming similarity index is built on demand from the declared embedding Parquet.",
@@ -303,7 +303,7 @@ public sealed class PluginDispatcher
                     "No preparation service is configured for this dispatcher.",
                     null, false, false, null, false, null, null, null, null))
                 .ToJson(),
-            // Declared relative paths only 鈥?never absolute local paths.
+            // Declared relative paths only — never absolute local paths.
             ["missing_assets"] = new JsonArray(report.Classifier.MissingFiles
                 .Concat(report.Embedding.MissingFiles)
                 .Concat(report.Dataset.MissingFiles)
@@ -311,7 +311,7 @@ public sealed class PluginDispatcher
                 .ToArray()),
             ["guidance"] = report.AnalyzeReady
                 ? "All declared files are present; run 'prepare_assets' with allow_download=false to load the models and index, or just invoke an action."
-                : "Declared files are missing. They are host-managed 鈥?the plugin never downloads: fetch them through the host's managed-files surface, then run 'prepare_assets' to load them.",
+                : "Declared files are missing. They are host-managed — the plugin never downloads: fetch them through the host's managed-files surface, then run 'prepare_assets' to load them.",
         };
     }
 

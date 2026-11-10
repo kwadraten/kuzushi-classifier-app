@@ -98,35 +98,6 @@
   .status-dot-pending { background: var(--outline-variant); }
   .status-dot-error { background: #D13438; }
 
-  /* ---------- Download consent dialog ---------- */
-  dialog.consent {
-    border: 1px solid var(--outline-variant);
-    border-radius: 12px;
-    padding: 20px;
-    max-width: 520px;
-    background: #FFFFFF;
-    color: var(--on-surface);
-    font: inherit;
-  }
-
-  dialog.consent::backdrop { background: rgba(0, 0, 0, 0.32); }
-  dialog.consent h3 { margin: 0 0 12px; font-size: 16px; }
-  dialog.consent .consent-body { font-size: 13px; color: var(--on-surface-variant); }
-  dialog.consent .consent-body ul { margin: 8px 0; padding-left: 18px; }
-  dialog.consent .consent-body li { word-break: break-all; font-family: Consolas, monospace; font-size: 11px; }
-  dialog.consent .consent-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-
-  .progress.indeterminate .progress-fill {
-    width: 30%;
-    animation: prep-slide 1.1s ease-in-out infinite;
-  }
-
-  @keyframes prep-slide {
-    0% { margin-left: 0; }
-    50% { margin-left: 70%; }
-    100% { margin-left: 0; }
-  }
-
   .candidate-row, .similar-row {
     display: flex;
     justify-content: space-between;
@@ -333,19 +304,7 @@
   .hw-reset svg { width: 12px; height: 12px; fill: var(--on-surface-variant); }
   .hw-reset span { font-size: 11px; }
 
-  /* ---------- Prep card ---------- */
-  .prep-status { font-size: 13px; color: var(--on-surface-variant); }
-
-  .progress {
-    height: 8px;
-    border-radius: 4px;
-    background: var(--surface-container-highest);
-    overflow: hidden;
-  }
-
-  .progress-fill { height: 100%; background: var(--brand-blue); border-radius: 4px; }
-
-  .analysis-note {
+  .action-hint {
     font-size: 12px;
     color: var(--on-surface-variant);
     text-align: center;
@@ -459,28 +418,14 @@
         </div>
       </div>
 
-      <!-- B. Prep card — driven live from status.json; hidden only once the
-           runtime is confirmed ready. -->
-      <div class="card" id="prepCard" hidden>
-        <div class="card-stack" style="gap:12px">
-          <h2 class="card-title-16" style="font-size:14px">应用资源准备</h2>
-          <div class="prep-status" id="prepStatus">正在启动应用...</div>
-          <div class="progress"><div class="progress-fill" id="prepFill" style="width:0%"></div></div>
-          <div style="display:flex;gap:8px">
-            <button type="button" class="btn-secondary" id="prepRetryButton" hidden>重试 / 下载</button>
-            <button type="button" class="btn-secondary" id="prepCancelButton" hidden>取消准备</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- C. Predict action card -->
+      <!-- B. Predict action card -->
       <div class="card">
         <div class="card-stack-tight">
           <button type="button" class="btn-primary" id="predictButton">
             <svg viewBox="0 0 24 24"><path d="M19,9l1.25-2.75L23,5l-2.75-1.25L19,1l-1.25,2.75L15,5l2.75,1.25L19,9z M11.5,9.5L9,4L6.5,9.5L1,12l5.5,2.5L9,20l2.5-5.5L17,12L11.5,9.5z M19,15l-1.25,2.75L15,19l2.75,1.25L19,22l1.25-2.75L23,19l-2.75-1.25L19,15z"/></svg>
-            <span>开始识别预测</span>
+            <span id="predictLabel">开始识别预测</span>
           </button>
-          <p class="analysis-note">分析过程通常在 2 秒内完成。</p>
+          <p class="action-hint" id="actionHint" hidden></p>
         </div>
       </div>
     </section>
@@ -513,23 +458,6 @@
     </section>
   </div>
 </main>
-
-<!-- Host-managed download consent: modal only, never auto-confirmed. The
-     host downloads + verifies the declared files; the plugin never does. -->
-<dialog class="consent" id="downloadDialog">
-  <h3>下载模型与本地字形库？</h3>
-  <div class="consent-body">
-    <div>首次使用需要由宿主下载以下受管文件（可能较大）：</div>
-    <ul id="downloadFileList"></ul>
-    <div>来源：HuggingFace <b>kwadraten/shikiji</b>（ONNX 模型与 metadata）与 COS
-      <b>scripts-1303933394.cos.ap-tokyo.myqcloud.com</b>（字形库 parquet）。</div>
-    <div id="downloadDest">由宿主下载并校验到其受管文件存储；插件进程不进行网络下载。</div>
-  </div>
-  <div class="consent-actions">
-    <button type="button" class="btn-secondary" id="downloadDecline">暂不下载</button>
-    <button type="button" class="btn-secondary" id="downloadConfirm" style="color:#FFFFFF;background:var(--brand-blue);border-color:var(--brand-blue)">下载并准备</button>
-  </div>
-</dialog>
 
 <script>
 (function () {
@@ -670,24 +598,17 @@
   var modelStatusText = document.getElementById("modelStatusText");
   var indexStatusDot = document.getElementById("indexStatusDot");
   var indexStatusText = document.getElementById("indexStatusText");
-  var prepCard = document.getElementById("prepCard");
-  var prepStatus = document.getElementById("prepStatus");
-  var prepFill = document.getElementById("prepFill");
-  var prepProgress = prepFill.parentElement;
-  var prepRetryButton = document.getElementById("prepRetryButton");
-  var prepCancelButton = document.getElementById("prepCancelButton");
   var predictButton = document.getElementById("predictButton");
+  var predictLabel = document.getElementById("predictLabel");
+  var actionHint = document.getElementById("actionHint");
   var resultsArea = document.getElementById("resultsArea");
   var similarArea = document.getElementById("similarArea");
-  var downloadDialog = document.getElementById("downloadDialog");
-  var downloadFileList = document.getElementById("downloadFileList");
-  var downloadDecline = document.getElementById("downloadDecline");
-  var downloadConfirm = document.getElementById("downloadConfirm");
 
   var lastStatus = null;
   var pollTimer = null;
   var pollInFlight = false;
   var unloaded = false;
+  var downloadInFlight = false;
 
   window.addEventListener("beforeunload", function () { unloaded = true; });
   window.addEventListener("pagehide", function () { unloaded = true; });
@@ -699,41 +620,29 @@
     text.textContent = label;
   }
 
-  function setPreparingProgress(fraction) {
-    if (fraction === null || fraction === undefined) {
-      prepProgress.classList.add("indeterminate");
-      prepFill.style.width = "30%";
-    } else {
-      prepProgress.classList.remove("indeterminate");
-      prepFill.style.width = Math.max(0, Math.min(100, fraction * 100)) + "%";
-    }
+  /* The primary button carries every not-ready state: there is no separate
+     progress surface — downloads and their progress belong to the host. */
+  function setAction(label, enabled, mode) {
+    predictLabel.textContent = label;
+    predictButton.disabled = !enabled;
+    predictButton.style.opacity = enabled ? "1" : "0.5";
+    predictButton.style.cursor = enabled ? "pointer" : "not-allowed";
+    actionMode = mode;
   }
 
-  function showPrep(statusText, fraction, retry, cancel) {
-    prepCard.hidden = false;
-    prepStatus.textContent = statusText;
-    setPreparingProgress(fraction);
-    prepRetryButton.hidden = !retry;
-    prepCancelButton.hidden = !cancel;
+  function showHint(text) {
+    actionHint.hidden = !text;
+    actionHint.textContent = text || "";
   }
 
-  function hidePrep() {
-    prepCard.hidden = true;
-  }
-
-  function updatePredictAvailability() {
-    var ready = !!(lastStatus && lastStatus.preparation &&
-      lastStatus.preparation.models_loaded && lastStatus.preparation.index_loaded);
-    predictButton.disabled = !ready;
-    predictButton.style.opacity = ready ? "1" : "0.5";
-    predictButton.style.cursor = ready ? "pointer" : "not-allowed";
-  }
+  var actionMode = "analyze"; // analyze | download | prepare | busy
 
   function applyStatus(status) {
     lastStatus = status;
     var prep = status.preparation || {};
     var modelsReady = !!prep.models_loaded;
     var indexReady = !!prep.index_loaded;
+    var missing = (status.missing_assets || []).length > 0;
 
     setDot(modelStatusDot, modelStatusText,
       prep.state === "failed" ? "error" : (modelsReady ? "ready" : "pending"),
@@ -742,46 +651,61 @@
       prep.state === "failed" ? "error" : (indexReady ? "ready" : "pending"),
       indexReady ? "索引库已加载" : "索引库未加载");
 
+    if (downloadInFlight) {
+      // Host download/consent UI owns this window of time — keep the button
+      // busy so the ensureFiles() request cannot be triggered twice.
+      setAction("正在请求宿主下载受管文件…", false, "busy");
+      return;
+    }
+
     switch (prep.state) {
       case "ready":
-        hidePrep();
+        setAction("开始识别预测", true, "analyze");
+        showHint("");
         stopPolling();
         break;
       case "preparing":
-        showPrep(prep.message || "正在准备…", prep.fraction, false, true);
+        setAction("正在准备…", false, "busy");
+        showHint(prep.message || "");
         startPolling();
         break;
       case "needs_download":
-        showPrep("缺少必需的受管文件，需要由宿主下载后才能使用。", null, false, false);
+        setAction("下载依赖文件", true, "download");
+        showHint("缺少必需的受管文件，需由宿主下载后才能使用。");
         stopPolling();
-        openDownloadDialog(status);
         break;
       case "failed":
-        showPrep("准备失败：" + (prep.error || prep.message || "未知错误"), null, true, false);
+        setAction(missing ? "重试下载" : "重试准备", true,
+          missing ? "download" : "prepare");
+        showHint("准备失败：" + (prep.error || prep.message || "未知错误"));
         stopPolling();
         break;
       case "cancelled":
-        showPrep("准备已取消。", null, true, false);
+        setAction("重试准备", true, missing ? "download" : "prepare");
+        showHint("准备已取消。");
         stopPolling();
         break;
       default: // idle
         if (modelsReady && indexReady) {
-          hidePrep();
+          setAction("开始识别预测", true, "analyze");
+          showHint("");
+        } else if (missing) {
+          setAction("下载依赖文件", true, "download");
+          showHint("缺少必需的受管文件，需由宿主下载后才能使用。");
         } else {
-          showPrep("资源未加载。", null, true, false);
+          setAction("准备资源", true, "prepare");
+          showHint("资源未加载。");
         }
         stopPolling();
         break;
     }
-
-    updatePredictAvailability();
   }
 
   function statusError(message) {
     setDot(modelStatusDot, modelStatusText, "error", "状态不可用");
     setDot(indexStatusDot, indexStatusText, "error", "状态不可用");
-    showPrep(message, null, false, false);
-    updatePredictAvailability();
+    if (!lastStatus) { setAction("开始识别预测", false, "busy"); }
+    showHint(message);
   }
 
   function fetchStatus() {
@@ -814,20 +738,6 @@
     }
   }
 
-  var dialogOpen = false;
-  function openDownloadDialog(status) {
-    if (dialogOpen || !downloadDialog || typeof downloadDialog.showModal !== "function") { return; }
-    var missing = status.missing_assets || [];
-    downloadFileList.textContent = "";
-    missing.forEach(function (path) {
-      var li = document.createElement("li");
-      li.textContent = path; // manifest-declared relative paths, never absolute
-      downloadFileList.appendChild(li);
-    });
-    dialogOpen = true;
-    downloadDialog.showModal();
-  }
-
   /* Managed-file downloads belong to the host: the view asks the bridge for the
      promised ensureFiles() Promise API (added host-side with the managed-files
      service), which downloads + verifies this plugin's declared [[files]] and
@@ -841,55 +751,38 @@
       "宿主桥接尚未提供受管文件下载接口（window.patchouli.ensureFiles）。"));
   }
 
-  downloadDecline.addEventListener("click", function () {
-    dialogOpen = false;
-    downloadDialog.close();
-    showPrep("已跳过下载。所需文件未就绪，识别不可用。", null, true, false);
-  });
-
-  downloadConfirm.addEventListener("click", function () {
-    dialogOpen = false;
-    downloadDialog.close();
-    showPrep("正在请求宿主下载受管文件…", null, false, false);
+  /* The 下载依赖文件 action: route straight to the host's managed-files
+     surface, which shows its own download/consent UI. */
+  function startDownload() {
+    downloadInFlight = true;
+    setAction("正在请求宿主下载受管文件…", false, "busy");
+    showHint("");
     startPolling();
     ensureManagedFiles()
-      .then(function () { sendPrepare(false); })
+      .then(function () {
+        downloadInFlight = false;
+        sendPrepare(false);
+      })
       .catch(function (error) {
+        downloadInFlight = false;
         stopPolling();
-        showPrep("受管文件下载未完成：" + (error && error.message ? error.message : error),
-          null, true, false);
+        setAction("重试下载", true, "download");
+        showHint("受管文件下载未完成：" + (error && error.message ? error.message : error));
       });
-  });
-
-  prepRetryButton.addEventListener("click", function () {
-    var missing = lastStatus && lastStatus.missing_assets && lastStatus.missing_assets.length;
-    if (missing) {
-      openDownloadDialog(lastStatus);
-    } else {
-      sendPrepare(false);
-    }
-  });
-
-  prepCancelButton.addEventListener("click", function () {
-    if (!bridge) { return; }
-    bridge.send("control", "cancel_preparation", {}).then(function () {
-      fetchStatus();
-    }).catch(function (error) {
-      showPrep("取消失败：" + (error && error.message ? error.message : error), null, true, false);
-    });
-  });
+  }
 
   /* prepare_assets only ever loads locally in the plugin (the plugin never
      downloads); allow_download is forwarded for host orchestration only. */
   function sendPrepare(allowDownload) {
     if (!bridge) { return; }
-    showPrep("正在启动准备…", 0, false, true);
+    setAction("正在启动准备…", false, "busy");
     startPolling();
     bridge.send("control", "prepare_assets", { allow_download: allowDownload })
       .then(function () { fetchStatus(); })
       .catch(function (error) {
-        showPrep("准备请求失败：" + (error && error.message ? error.message : error), null, true, false);
         stopPolling();
+        setAction("重试准备", true, "prepare");
+        showHint("准备请求失败：" + (error && error.message ? error.message : error));
       });
   }
 
@@ -922,6 +815,9 @@
 
   predictButton.addEventListener("click", function () {
     if (!bridge || predictButton.disabled) { return; }
+    if (actionMode === "download") { startDownload(); return; }
+    if (actionMode === "prepare") { sendPrepare(false); return; }
+    if (actionMode !== "analyze") { return; }
     var payload = currentImagePayload();
     if (!payload) {
       resultsArea.textContent = "请先上传图像或在手写板书写。";
@@ -989,9 +885,7 @@
   }
 
   /* ---- Boot: bridge check, then real status ---- */
-  predictButton.disabled = true;
-  predictButton.style.opacity = "0.5";
-  predictButton.style.cursor = "not-allowed";
+  setAction("开始识别预测", false, "analyze");
 
   if (!bridge) {
     statusError("宿主桥接不可用：无法与插件进程通信。");
@@ -1001,8 +895,8 @@
       var prep = status.preparation || {};
       var missing = (status.missing_assets || []).length > 0;
       // Auto-load only ever uses already-present files: any missing declared
-      // file waits for the explicit in-dialog consent which routes through the
-      // host's managed-file download; a complete file set loads locally.
+      // file waits for the explicit 下载依赖文件 action, which routes through
+      // the host's managed-file download; a complete file set loads locally.
       if (!missing && !prep.models_loaded && prep.state !== "preparing") {
         sendPrepare(false);
       }

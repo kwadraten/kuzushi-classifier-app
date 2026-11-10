@@ -164,9 +164,10 @@ once the host reports them ready. The view uses them to:
   dots stay neutral until `preparation.models_loaded`/`index_loaded` are
   confirmed true — they never render a hardcoded green.
 - Auto-run `prepare_assets {allow_download:false}` only when the declared
-  files are all present; missing files open a real modal `<dialog>` and the
-  explicit 下载并准备 button first calls `ensureManagedFiles()` (the host-side
-  download), then `prepare_assets {allow_download:false}` for the local load.
+  files are all present; with missing files the primary button switches to
+  下载依赖文件 and routes through `ensureManagedFiles()` (the host-side
+  download, which shows its own consent/progress UI), then
+  `prepare_assets {allow_download:false}` for the local load.
 - Drive the predict button through `send("control","analyze",
   {image_base64, media_type, top_k:10})` with the uploaded image or the
   white-backed handwriting canvas, rendering candidates/similar rows with
