@@ -22,6 +22,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Desktop publish failed.' }
 
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 $pluginPublish = Join-Path $root "KuzushiClassifierApp.Plugin/bin/Release/net10.0/$Runtime/publish"
+# Debug symbols are not part of the shipped plugin: libSkiaSharp.pdb alone adds ~80 MB.
+Remove-Item -Path (Join-Path $pluginPublish '*.pdb') -Force -ErrorAction SilentlyContinue
 $pluginZip = Join-Path $releaseRoot "kwadraten.kuzushi-classifier-$Version-$Runtime.zip"
 if (Test-Path -LiteralPath $pluginZip) { Remove-Item -LiteralPath $pluginZip -Force }
 [System.IO.Compression.ZipFile]::CreateFromDirectory($pluginPublish, $pluginZip)
