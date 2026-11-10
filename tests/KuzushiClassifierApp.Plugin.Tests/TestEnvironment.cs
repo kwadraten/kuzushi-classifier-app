@@ -59,8 +59,8 @@ internal sealed class FakeDataRoot : IAppDataPathProvider, IDisposable
             new byte[2048]);
     }
 
-    public PluginAssetProbe CreateProbe() =>
-        new(new CachedModelPathProvider(this), this);
+    public PluginAssetProbe CreateProbe(PluginManagedFiles? managedFiles = null) =>
+        new(new CachedModelPathProvider(this, managedFiles));
 
     private static void Touch(string path)
     {
@@ -68,7 +68,7 @@ internal sealed class FakeDataRoot : IAppDataPathProvider, IDisposable
         File.WriteAllBytes(path, new byte[] { 1 });
     }
 
-    private static string RepoRoot()
+    internal static string RepoRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current is not null)
@@ -82,6 +82,65 @@ internal sealed class FakeDataRoot : IAppDataPathProvider, IDisposable
         }
 
         return AppContext.BaseDirectory;
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(Root))
+            {
+                Directory.Delete(Root, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+        }
+    }
+}
+
+/// <summary>
+/// A fake host managed-file store: a directory plus the matching
+/// PluginManagedFiles map. The plugin only reads files the host has already
+/// placed — Touch helpers simulate exactly that completed download.
+/// </summary>
+internal sealed class FakeManagedStore : IDisposable
+{
+    private FakeManagedStore(string root)
+    {
+        Root = root;
+        Files = new PluginManagedFiles(root, null);
+    }
+
+    public string Root { get; }
+
+    public PluginManagedFiles Files { get; }
+
+    public string AbsolutePathFor(string relativePath) =>
+        Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    public static FakeManagedStore Create()
+    {
+        var root = Path.Combine(
+            FakeDataRoot.RepoRoot(), ".tmp", "tests", "managed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        return new FakeManagedStore(root);
+    }
+
+    public void Touch(string relativePath, int bytes = 1)
+    {
+        var absolute = AbsolutePathFor(relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        File.WriteAllBytes(absolute, new byte[bytes]);
+    }
+
+    public void TouchAllDeclared()
+    {
+        Touch(PluginManagedFiles.ClassifierModel);
+        Touch(PluginManagedFiles.ClassifierMetadata);
+        Touch(PluginManagedFiles.EmbeddingModel);
+        Touch(PluginManagedFiles.EmbeddingMetadata);
+        Touch(PluginManagedFiles.DatasetParquet, bytes: 2048);
     }
 
     public void Dispose()

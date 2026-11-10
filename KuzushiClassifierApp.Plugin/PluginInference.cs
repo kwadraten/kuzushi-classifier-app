@@ -10,7 +10,8 @@ namespace KuzushiClassifierApp.Plugin;
 /// OnnxImageClassifierService/OnnxImageEmbeddingService lazily initialize
 /// their sessions without locking, so every model touch is serialized
 /// through a single gate. Readiness is probed from the file system before
-/// any work; missing cached assets fail UNAVAILABLE instead of downloading.
+/// any work; missing declared files fail UNAVAILABLE — the plugin never
+/// downloads: files are host-managed and fetched by the host itself.
 /// </summary>
 public sealed class PluginInference
 {
@@ -33,6 +34,37 @@ public sealed class PluginInference
         _embeddingIndexService = embeddingIndexService;
     }
 
+    /// <summary>Whether the streaming similarity index is actually built.</summary>
+    public bool IndexReady => _embeddingIndexService.IsReady;
+
+    /// <summary>
+    /// Runs an asset/model preparation delegate under the same gate as inference so model
+    /// loading and index building can never race a running classify/similar/analyze call.
+    /// This method only serializes; the delegate is the local-load pipeline and never
+    /// downloads — declared files are host-managed.
+    /// </summary>
+    public async Task PrepareAsync(
+        Func<IProgress<AssetPreparationProgress>?, CancellationToken, Task> preparation,
+        IProgress<AssetPreparationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(preparation);
+
+        await _inferenceGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await preparation(progress, cancellationToken).ConfigureAwait(false);
+            if (_embeddingIndexService.IsReady)
+            {
+                _embeddingIndexBuilt = true;
+            }
+        }
+        finally
+        {
+            _inferenceGate.Release();
+        }
+    }
+
     public async Task<JsonObject> RunAsync(
         string action,
         KuzushiImage image,
@@ -44,9 +76,11 @@ public sealed class PluginInference
         {
             throw new ToolErrorException(
                 ToolErrorCodes.Unavailable,
-                $"Cannot run '{action}': required cached assets are missing. " +
+                $"Cannot run '{action}': required assets are missing. " +
                 $"Missing: {string.Join("; ", missing)}. " +
-                "Prepare them by running the standalone app once; this plugin never downloads assets.");
+                "These are declared host-managed files — download them through the " +
+                "host's managed-files flow first (the plugin never downloads), " +
+                "then run 'prepare_assets' to load them.");
         }
 
         await _inferenceGate.WaitAsync(cancellationToken).ConfigureAwait(false);

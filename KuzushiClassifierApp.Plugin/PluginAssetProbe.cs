@@ -1,42 +1,38 @@
 using System.Text.Json.Nodes;
-using KuzushiClassifierApp.Platform;
-using KuzushiClassifierApp.Services;
 
 namespace KuzushiClassifierApp.Plugin;
 
 /// <summary>
 /// Pure file-system readiness probe. Never downloads, never creates ONNX
-/// sessions, never builds the embedding index — it only inspects the cache
-/// directories the standalone app already maintains.
+/// sessions, never builds the embedding index, never creates directories —
+/// it only inspects the resolved locations from <see cref="CachedModelPathProvider"/>.
+/// Agent-facing output reports the manifest-declared relative paths; the
+/// absolute locations (host-managed or app-data) stay internal.
 /// </summary>
 public sealed class PluginAssetProbe
 {
-    private readonly IModelPathProvider _modelPathProvider;
-    private readonly string _datasetDirectory;
-    private readonly string _dataRoot;
+    private readonly CachedModelPathProvider _paths;
 
-    public PluginAssetProbe(
-        IModelPathProvider modelPathProvider,
-        IAppDataPathProvider appDataPathProvider)
+    public PluginAssetProbe(CachedModelPathProvider modelPaths)
     {
-        ArgumentNullException.ThrowIfNull(modelPathProvider);
-        ArgumentNullException.ThrowIfNull(appDataPathProvider);
-
-        _modelPathProvider = modelPathProvider;
-        _datasetDirectory = appDataPathProvider.GetDatasetCacheDirectory();
-        _dataRoot = appDataPathProvider.GetAppDataDirectory();
+        ArgumentNullException.ThrowIfNull(modelPaths);
+        _paths = modelPaths;
     }
 
-    public string DataRoot => _dataRoot;
+    /// <summary>Whether the host injected managed-file locations at launch.</summary>
+    public bool ManagedFilesConfigured => _paths.ManagedFilesConfigured;
 
-    public string DatasetParquetPath => Path.Combine(
-        _datasetDirectory,
-        ParquetFileEmbeddingCacheService.CacheFileName);
+    /// <summary>Internal resolved dataset location — never exposed in agent-facing JSON.</summary>
+    internal string DatasetParquetPath => _paths.DatasetParquetPath;
 
     public PluginAssetReport Probe()
     {
-        var classifier = ProbeModelPair(_modelPathProvider.ClassifierModelPath);
-        var embedding = ProbeModelPair(_modelPathProvider.EmbeddingModelPath);
+        var classifier = ProbeGroup(
+            (PluginManagedFiles.ClassifierModel, _paths.ClassifierModelPath),
+            (PluginManagedFiles.ClassifierMetadata, _paths.ClassifierMetadataPath));
+        var embedding = ProbeGroup(
+            (PluginManagedFiles.EmbeddingModel, _paths.EmbeddingModelPath),
+            (PluginManagedFiles.EmbeddingMetadata, _paths.EmbeddingMetadataPath));
         var dataset = ProbeDataset();
 
         return new PluginAssetReport(classifier, embedding, dataset);
@@ -46,6 +42,7 @@ public sealed class PluginAssetProbe
     /// Assets an action needs before any inference is attempted.
     /// classify only needs the classifier model; similar needs the embedding
     /// model plus the cached embedding dataset; analyze needs all of them.
+    /// Missing entries name the declared relative paths (agent-safe).
     /// </summary>
     public IReadOnlyList<string> MissingFor(string action, PluginAssetReport? report = null)
     {
@@ -74,34 +71,50 @@ public sealed class PluginAssetProbe
         return missing;
     }
 
-    private static AssetGroup ProbeModelPair(string modelPath)
+    private AssetGroup ProbeGroup(params (string Relative, string Absolute)[] files)
     {
-        var metadataPath = CachedModelPathProvider.MetadataPathFor(modelPath);
-        var files = new[]
-        {
-            new AssetFile(modelPath, File.Exists(modelPath)),
-            new AssetFile(metadataPath, File.Exists(metadataPath)),
-        };
-
-        return new AssetGroup(files);
+        return new AssetGroup(files
+            .Select(file => new AssetFile(
+                file.Relative,
+                file.Absolute,
+                File.Exists(file.Absolute),
+                _paths.IsManaged(file.Relative)))
+            .ToArray());
     }
 
     private AssetGroup ProbeDataset()
     {
-        var path = DatasetParquetPath;
-        var exists = File.Exists(path) && new FileInfo(path).Length > 1024;
-        return new AssetGroup(new[] { new AssetFile(path, exists) });
+        var absolute = _paths.DatasetParquetPath;
+        var exists = File.Exists(absolute) && new FileInfo(absolute).Length > 1024;
+        return new AssetGroup(new[]
+        {
+            new AssetFile(
+                PluginManagedFiles.DatasetParquet,
+                absolute,
+                exists,
+                _paths.IsManaged(PluginManagedFiles.DatasetParquet)),
+        });
     }
 }
 
-public sealed record AssetFile(string Path, bool Exists);
+/// <summary>
+/// One probed file. <see cref="RelativePath"/> is the manifest-declared path
+/// shown to agents; <see cref="AbsolutePath"/> is the resolved internal
+/// location and is never serialized into status payloads.
+/// </summary>
+public sealed record AssetFile(
+    string RelativePath,
+    string AbsolutePath,
+    bool Exists,
+    bool Managed);
 
 public sealed record AssetGroup(IReadOnlyList<AssetFile> Files)
 {
     public bool Ready => Files.All(file => file.Exists);
 
+    /// <summary>Declared relative paths of missing files (agent-safe).</summary>
     public IReadOnlyList<string> MissingFiles =>
-        Files.Where(file => !file.Exists).Select(file => file.Path).ToArray();
+        Files.Where(file => !file.Exists).Select(file => file.RelativePath).ToArray();
 
     public JsonObject ToJson()
     {
@@ -111,8 +124,9 @@ public sealed record AssetGroup(IReadOnlyList<AssetFile> Files)
             ["files"] = new JsonArray(Files
                 .Select(file => (JsonNode)new JsonObject
                 {
-                    ["path"] = file.Path,
+                    ["path"] = file.RelativePath,
                     ["exists"] = file.Exists,
+                    ["managed"] = file.Managed,
                 })
                 .ToArray()),
         };

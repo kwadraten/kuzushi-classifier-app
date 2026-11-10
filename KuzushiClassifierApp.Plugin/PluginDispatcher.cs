@@ -13,31 +13,35 @@ namespace KuzushiClassifierApp.Plugin;
 public sealed class PluginDispatcher
 {
     public const string PluginId = "kwadraten.kuzushi-classifier";
-    public const string PluginVersion = "0.1.0";
+    public const string PluginVersion = "0.3.0";
     public const string PluginRootUri = "patchouli://plugin/" + PluginId + "/";
 
     private const int DefaultLimit = 20;
     private const int MaxLimit = 50;
     private const string ResultsScope = "results/";
 
-    private static readonly string[] Actions = { "classify", "similar", "analyze" };
+    private static readonly string[] Actions =
+        { "classify", "similar", "analyze", "prepare_assets", "cancel_preparation" };
     private static readonly string[] SendArgsKeys = { "image_base64", "media_type", "top_k" };
 
     private readonly PluginAssetProbe _assetProbe;
     private readonly PluginInference _inference;
     private readonly ResultStore _resultStore;
     private readonly DedupeStore _dedupeStore;
+    private readonly PluginPreparation? _preparation;
 
     public PluginDispatcher(
         PluginAssetProbe assetProbe,
         PluginInference inference,
         ResultStore resultStore,
-        DedupeStore dedupeStore)
+        DedupeStore dedupeStore,
+        PluginPreparation? preparation = null)
     {
         _assetProbe = assetProbe;
         _inference = inference;
         _resultStore = resultStore;
         _dedupeStore = dedupeStore;
+        _preparation = preparation;
     }
 
     // ----------------------------------------------------------------- find
@@ -256,23 +260,35 @@ public sealed class PluginDispatcher
     private JsonObject StatusDocument()
     {
         var report = _assetProbe.Probe();
+        var managed = _assetProbe.ManagedFilesConfigured;
 
         return new JsonObject
         {
             ["plugin_id"] = PluginId,
             ["version"] = PluginVersion,
-            ["data_root"] = _assetProbe.DataRoot,
-            ["downloads_performed"] = false,
+            // Always false: this plugin never downloads. Download state, when
+            // files are missing, is reported by the host's own files surface.
+            ["downloads_performed"] = _preparation?.GetSnapshot().DownloadsPerformed ?? false,
+            ["managed_files"] = new JsonObject
+            {
+                ["enabled"] = managed,
+                ["note"] = managed
+                    ? "Declared files resolve from host-managed locations injected at launch; download state is reported by the host's own files surface."
+                    : "No host-managed file locations were injected; declared files resolve from the plugin data root (development layout).",
+            },
             ["assets"] = new JsonObject
             {
+                // File entries carry the manifest-declared relative paths only 鈥?
+                // resolved absolute locations are internal to the plugin process.
                 ["classifier_model"] = report.Classifier.ToJson(),
                 ["embedding_model"] = report.Embedding.ToJson(),
                 ["dataset"] = report.Dataset.ToJson(),
                 ["embedding_index"] = new JsonObject
                 {
-                    ["ready"] = report.Dataset.Ready,
+                    // Actual runtime index state 鈥?file existence alone proves nothing.
+                    ["ready"] = _inference.IndexReady,
                     ["derived_from"] = "dataset",
-                    ["note"] = "The streaming similarity index is built on demand from the cached embedding Parquet.",
+                    ["note"] = "The streaming similarity index is built on demand from the declared embedding Parquet.",
                 },
             },
             ["capabilities"] = new JsonObject
@@ -281,14 +297,21 @@ public sealed class PluginDispatcher
                 ["similar"] = new JsonObject { ["ready"] = report.SimilarReady },
                 ["analyze"] = new JsonObject { ["ready"] = report.AnalyzeReady },
             },
+            ["preparation"] = (_preparation?.GetSnapshot()
+                ?? new PluginPreparation.Snapshot(
+                    PluginPreparation.StateIdle,
+                    "No preparation service is configured for this dispatcher.",
+                    null, false, false, null, false, null, null, null, null))
+                .ToJson(),
+            // Declared relative paths only 鈥?never absolute local paths.
             ["missing_assets"] = new JsonArray(report.Classifier.MissingFiles
                 .Concat(report.Embedding.MissingFiles)
                 .Concat(report.Dataset.MissingFiles)
                 .Select(path => (JsonNode)path)
                 .ToArray()),
-            ["guidance"] = report.ClassifyReady || report.SimilarReady
-                ? "Missing assets must be prepared by running the standalone KuzushiClassifierApp once; this plugin never downloads."
-                : "No cached assets found. Run the standalone KuzushiClassifierApp once to download models and dataset; this plugin never downloads.",
+            ["guidance"] = report.AnalyzeReady
+                ? "All declared files are present; run 'prepare_assets' with allow_download=false to load the models and index, or just invoke an action."
+                : "Declared files are missing. They are host-managed 鈥?the plugin never downloads: fetch them through the host's managed-files surface, then run 'prepare_assets' to load them.",
         };
     }
 
@@ -336,10 +359,18 @@ public sealed class PluginDispatcher
         {
             throw new ToolErrorException(
                 ToolErrorCodes.UnsupportedOperation,
-                $"Unknown action '{action}'; supported: classify, similar, analyze.");
+                $"Unknown action '{action}'; supported: classify, similar, analyze, prepare_assets, cancel_preparation.");
         }
 
         var args = GetRequiredObject(arguments, "args");
+
+        // Prepare/cancel are argument-validated here so image parsing stays scoped to the
+        // inference actions; both are naturally idempotent start/cancel verbs.
+        if (action is "prepare_assets" or "cancel_preparation")
+        {
+            return ExecutePreparationAction(action, args);
+        }
+
         var (image, topK) = ParseActionArgs(args);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -401,6 +432,58 @@ public sealed class PluginDispatcher
         }
 
         throw Invalid($"send 'target' must be \"\" (this plugin's root); got '{target}'.");
+    }
+
+    /// <summary>
+    /// Synchronous start/cancel of the single background preparation job. Returns the
+    /// live snapshot immediately; real progress is polled through status.json.
+    /// </summary>
+    private JsonObject ExecutePreparationAction(string action, JsonObject args)
+    {
+        PluginPreparation.Snapshot snapshot;
+        switch (action)
+        {
+            case "prepare_assets":
+                foreach (var key in args.Select(p => p.Key))
+                {
+                    if (key != "allow_download")
+                    {
+                        throw Invalid($"args contains unsupported property '{key}'.");
+                    }
+                }
+
+                if (args["allow_download"] is not JsonValue allowNode ||
+                    !allowNode.TryGetValue<bool>(out var allowDownload))
+                {
+                    throw Invalid("args.allow_download is required and must be a boolean.");
+                }
+
+                snapshot = (_preparation ?? throw PreparationUnavailable()).Start(allowDownload);
+                break;
+            case "cancel_preparation":
+                if (args.Count > 0)
+                {
+                    throw Invalid("cancel_preparation takes an empty args object.");
+                }
+
+                snapshot = (_preparation ?? throw PreparationUnavailable()).Cancel();
+                break;
+            default:
+                throw Invalid($"Unsupported preparation action '{action}'.");
+        }
+
+        return new JsonObject
+        {
+            ["state"] = "completed",
+            ["result"] = snapshot.ToJson(),
+        };
+    }
+
+    private static ToolErrorException PreparationUnavailable()
+    {
+        return new ToolErrorException(
+            ToolErrorCodes.Unavailable,
+            "Preparation is not available in this plugin process.");
     }
 
     private async Task<SendOutcome> ExecuteSendAsync(

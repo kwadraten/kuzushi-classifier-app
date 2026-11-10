@@ -1,11 +1,11 @@
-# Patchouli development plugin manifest — kwadraten.kuzushi-classifier
+# Patchouli development plugin manifest 鈥?kwadraten.kuzushi-classifier
 # Static contract: the host must be able to read this file, its referenced
 # schemas and the readme without starting the plugin process.
 
 schema = "patchouli.plugin/1"
 host-api = "patchouli.plugins/1"
 id = "kwadraten.kuzushi-classifier"
-version = "0.2.0"
+version = "0.3.0"
 name = "Kuzushi Classifier"
 description = "Local ONNX kuzushi (cursive Japanese) single-character classification and dataset similarity lookup. Results are kept in memory for the lifetime of the plugin process only."
 license = "MIT"
@@ -19,6 +19,38 @@ args = []
 
 [library]
 grants = []
+
+# Host-managed files: every runtime payload the plugin needs. The host
+# downloads and verifies them into its own managed store and injects their
+# locations at launch (--patchouli-managed-files / --patchouli-managed-file);
+# the plugin process itself never downloads. download_url is the fixed public
+# source currently used by the standalone app. expected_bytes/sha256 are
+# omitted because no pinned size or digest constant exists for these payloads;
+# version is omitted because the HuggingFace reference is the moving 'main'.
+[[files]]
+path = "models/supervised_pretrain_checkpoint.onnx"
+download_url = "https://huggingface.co/kwadraten/shikiji/resolve/main/supervised_pretrain_checkpoint.onnx"
+summary = "Classifier ONNX model weights."
+
+[[files]]
+path = "models/supervised_pretrain_checkpoint.metadata.json"
+download_url = "https://huggingface.co/kwadraten/shikiji/resolve/main/supervised_pretrain_checkpoint.metadata.json"
+summary = "Classifier model metadata (input/output names, image size, labels)."
+
+[[files]]
+path = "models/supervised_pretrain_checkpoint.embedding.onnx"
+download_url = "https://huggingface.co/kwadraten/shikiji/resolve/main/supervised_pretrain_checkpoint.embedding.onnx"
+summary = "Image-embedding ONNX model weights."
+
+[[files]]
+path = "models/supervised_pretrain_checkpoint.embedding.metadata.json"
+download_url = "https://huggingface.co/kwadraten/shikiji/resolve/main/supervised_pretrain_checkpoint.embedding.metadata.json"
+summary = "Embedding model metadata (input/output names, image size, labels)."
+
+[[files]]
+path = "datasets/image-embeddings.with-webp.parquet"
+download_url = "https://scripts-1303933394.cos.ap-tokyo.myqcloud.com/embeddings/image-embeddings.with-webp.parquet"
+summary = "Glyph dataset: precomputed image embeddings with embedded WebP images."
 
 [[vfs.nodes]]
 path = ""
@@ -79,8 +111,24 @@ result_schema = "schemas/result.json"
 execution_mode = "sync"
 side_effects = "Creates an in-memory result; no library writes or downloads."
 
+[[vfs.endpoints.messages]]
+action = "prepare_assets"
+target_types = ["plugin-root"]
+input_schema = "schemas/prepare-assets.json"
+result_schema = "schemas/preparation.json"
+execution_mode = "sync"
+side_effects = "Starts the single background preparation job and returns its snapshot. allow_download is retained for host/UI orchestration compatibility only: the plugin never downloads 鈥?missing declared [[files]] return needs_download and must be fetched through the host's managed-files surface; present files are loaded locally (ONNX sessions, dataset, similarity index)."
+
+[[vfs.endpoints.messages]]
+action = "cancel_preparation"
+target_types = ["plugin-root"]
+input_schema = "schemas/cancel-preparation.json"
+result_schema = "schemas/preparation.json"
+execution_mode = "sync"
+side_effects = "Cancels the in-flight preparation job; a later prepare_assets may retry."
+
 [[ui.views]]
 id = "main"
-title = "本地崩字识别"
+title = "鏈湴宕╁瓧璇嗗埆"
 placement = "window"
 source = "ui/main.html"

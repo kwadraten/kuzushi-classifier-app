@@ -7,6 +7,7 @@ public enum AssetPreparationStep
     DownloadingDataset,
     LoadingDataset,
     LoadingEmbeddingCache,
+    LoadingModels,
     CalculatingEmbeddings,
     SavingEmbeddingCache,
     BuildingEmbeddingIndex,

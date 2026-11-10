@@ -11,12 +11,27 @@ public sealed class StreamingParquetImageLibraryService : IImageLibraryService
     private readonly string _embeddingsPath;
 
     public StreamingParquetImageLibraryService(IAppDataPathProvider appDataPathProvider)
+        : this(EmbeddingsPathFor(appDataPathProvider))
+    {
+    }
+
+    private static string EmbeddingsPathFor(IAppDataPathProvider appDataPathProvider)
     {
         ArgumentNullException.ThrowIfNull(appDataPathProvider);
-
-        _embeddingsPath = Path.Combine(
+        return Path.Combine(
             appDataPathProvider.GetDatasetCacheDirectory(),
             ParquetFileEmbeddingCacheService.CacheFileName);
+    }
+
+    /// <summary>
+    /// Reads from an explicit Parquet file location (for example a host-managed
+    /// file path injected into the plugin process at launch).
+    /// </summary>
+    public StreamingParquetImageLibraryService(string embeddingsPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(embeddingsPath);
+
+        _embeddingsPath = embeddingsPath;
     }
 
     public async Task<IReadOnlyList<DatasetImage>> LoadImagesAsync(

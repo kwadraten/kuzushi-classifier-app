@@ -104,7 +104,7 @@ public sealed class RealModelTests
     {
         var appData = new AppDataPathProvider();
         var paths = new CachedModelPathProvider(appData);
-        var probe = new PluginAssetProbe(paths, appData);
+        var probe = new PluginAssetProbe(paths);
         var report = probe.Probe();
 
         if (!report.ClassifyReady)

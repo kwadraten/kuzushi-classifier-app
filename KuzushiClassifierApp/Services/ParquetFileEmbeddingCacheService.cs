@@ -23,14 +23,29 @@ public sealed class ParquetFileEmbeddingCacheService : IEmbeddingCacheService
     public ParquetFileEmbeddingCacheService(
         IAppDataPathProvider appDataPathProvider,
         ILogger<ParquetFileEmbeddingCacheService> logger)
+        : this(CachePathFor(appDataPathProvider), logger)
+    {
+    }
+
+    private static string CachePathFor(IAppDataPathProvider appDataPathProvider)
     {
         ArgumentNullException.ThrowIfNull(appDataPathProvider);
+        return Path.Combine(appDataPathProvider.GetDatasetCacheDirectory(), CacheFileName);
+    }
+
+    /// <summary>
+    /// Targets an explicit Parquet file location (for example a host-managed
+    /// file path injected into the plugin process at launch).
+    /// </summary>
+    public ParquetFileEmbeddingCacheService(
+        string cacheFilePath,
+        ILogger<ParquetFileEmbeddingCacheService> logger)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cacheFilePath);
         ArgumentNullException.ThrowIfNull(logger);
 
         _logger = logger;
-        _cacheFilePath = Path.Combine(
-            appDataPathProvider.GetDatasetCacheDirectory(),
-            CacheFileName);
+        _cacheFilePath = cacheFilePath;
     }
 
     public async Task<EmbeddingCacheMetadata?> TryReadMetadataAsync(

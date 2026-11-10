@@ -2,40 +2,85 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kwadraten.dev/kuzushi-classifier/schemas/status.json",
   "title": "Kuzushi Classifier plugin status",
-  "description": "Readiness of the locally cached assets. The probe never downloads and never initializes model sessions or the similarity index.",
+  "description": "Readiness of the declared host-managed files plus the live preparation job state. The probe never downloads and never creates directories; loaded flags reflect runtime state, not file existence. Agent-facing file paths are the manifest-declared relative paths — absolute local locations are never exposed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "plugin_id",
     "version",
-    "data_root",
     "downloads_performed",
+    "managed_files",
     "assets",
     "capabilities",
     "missing_assets",
+    "preparation",
     "guidance"
   ],
   "properties": {
-    "plugin_id": { "const": "kwadraten.kuzushi-classifier" },
-    "version": { "type": "string" },
-    "data_root": { "type": "string" },
-    "downloads_performed": { "const": false },
+    "plugin_id": {
+      "const": "kwadraten.kuzushi-classifier"
+    },
+    "version": {
+      "type": "string"
+    },
+    "downloads_performed": {
+      "type": "boolean",
+      "description": "Always false in the plugin — it never downloads. Download state is reported by the host's own managed-files surface."
+    },
+    "managed_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "note"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "True when the host injected managed-file locations at launch; false means the app-data (development) layout is in effect."
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
     "assets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["classifier_model", "embedding_model", "dataset", "embedding_index"],
+      "required": [
+        "classifier_model",
+        "embedding_model",
+        "dataset",
+        "embedding_index"
+      ],
       "properties": {
-        "classifier_model": { "$ref": "#/$defs/asset_group" },
-        "embedding_model": { "$ref": "#/$defs/asset_group" },
-        "dataset": { "$ref": "#/$defs/asset_group" },
+        "classifier_model": {
+          "$ref": "#/$defs/asset_group"
+        },
+        "embedding_model": {
+          "$ref": "#/$defs/asset_group"
+        },
+        "dataset": {
+          "$ref": "#/$defs/asset_group"
+        },
         "embedding_index": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["ready", "derived_from", "note"],
+          "required": [
+            "ready",
+            "derived_from",
+            "note"
+          ],
           "properties": {
-            "ready": { "type": "boolean" },
-            "derived_from": { "const": "dataset" },
-            "note": { "type": "string" }
+            "ready": {
+              "type": "boolean"
+            },
+            "derived_from": {
+              "const": "dataset"
+            },
+            "note": {
+              "type": "string"
+            }
           }
         }
       }
@@ -43,35 +88,151 @@
     "capabilities": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["classify", "similar", "analyze"],
+      "required": [
+        "classify",
+        "similar",
+        "analyze"
+      ],
       "properties": {
-        "classify": { "$ref": "#/$defs/capability" },
-        "similar": { "$ref": "#/$defs/capability" },
-        "analyze": { "$ref": "#/$defs/capability" }
+        "classify": {
+          "$ref": "#/$defs/capability"
+        },
+        "similar": {
+          "$ref": "#/$defs/capability"
+        },
+        "analyze": {
+          "$ref": "#/$defs/capability"
+        }
       }
     },
     "missing_assets": {
       "type": "array",
-      "items": { "type": "string" }
+      "description": "Declared relative paths of missing files; download them through the host's managed-files surface, then run prepare_assets.",
+      "items": {
+        "type": "string"
+      }
     },
-    "guidance": { "type": "string" }
+    "guidance": {
+      "type": "string"
+    },
+    "preparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "message",
+        "fraction",
+        "models_loaded",
+        "index_loaded",
+        "error",
+        "downloads_performed",
+        "bytes_downloaded",
+        "total_bytes",
+        "items_processed",
+        "total_items"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "idle",
+            "needs_download",
+            "preparing",
+            "ready",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "fraction": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "models_loaded": {
+          "type": "boolean"
+        },
+        "index_loaded": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "downloads_performed": {
+          "type": "boolean"
+        },
+        "bytes_downloaded": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "total_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "items_processed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "total_items": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    }
   },
   "$defs": {
     "asset_group": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ready", "files"],
+      "required": [
+        "ready",
+        "files"
+      ],
       "properties": {
-        "ready": { "type": "boolean" },
+        "ready": {
+          "type": "boolean"
+        },
         "files": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "exists"],
+            "required": [
+              "path",
+              "exists",
+              "managed"
+            ],
             "properties": {
-              "path": { "type": "string" },
-              "exists": { "type": "boolean" }
+              "path": {
+                "type": "string",
+                "description": "Manifest-declared plugin-relative path ([[files]] entry); never an absolute local path."
+              },
+              "exists": {
+                "type": "boolean"
+              },
+              "managed": {
+                "type": "boolean",
+                "description": "True when this file resolves to a host-injected managed location; false when it resolves to the plugin's app-data layout."
+              }
             }
           }
         }
@@ -80,9 +241,13 @@
     "capability": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ready"],
+      "required": [
+        "ready"
+      ],
       "properties": {
-        "ready": { "type": "boolean" }
+        "ready": {
+          "type": "boolean"
+        }
       }
     }
   }

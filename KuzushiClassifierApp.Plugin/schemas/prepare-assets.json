@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kwadraten.dev/kuzushi-classifier/schemas/prepare-assets.json",
+  "title": "Kuzushi Classifier prepare_assets args",
+  "description": "Args for the 'control' endpoint prepare_assets action. The plugin performs a local load only and never downloads: allow_download is retained for host/UI orchestration compatibility (the host owns the actual download through its managed-files surface). Missing declared files always yield needs_download regardless of its value.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["allow_download"],
+  "properties": {
+    "allow_download": { "type": "boolean" }
+  }
+}

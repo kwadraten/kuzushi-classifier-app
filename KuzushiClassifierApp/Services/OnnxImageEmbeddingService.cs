@@ -11,12 +11,17 @@ public sealed class OnnxImageEmbeddingService : IImageEmbeddingService, IDisposa
     private InferenceSession? _session;
     private OnnxModelMetadata? _metadata;
 
-    public OnnxImageEmbeddingService(IModelPathProvider modelPathProvider)
+    /// <param name="modelPathProvider">Supplies the embedding ONNX model path.</param>
+    /// <param name="metadataPath">
+    /// Optional explicit metadata JSON path; defaults to the conventional
+    /// <c>{model}.metadata.json</c> sibling of the model file.
+    /// </param>
+    public OnnxImageEmbeddingService(IModelPathProvider modelPathProvider, string? metadataPath = null)
     {
         ArgumentNullException.ThrowIfNull(modelPathProvider);
 
         _modelPath = modelPathProvider.EmbeddingModelPath;
-        _metadataPath = Path.ChangeExtension(_modelPath, ".metadata.json");
+        _metadataPath = metadataPath ?? Path.ChangeExtension(_modelPath, ".metadata.json");
     }
 
     public Task<ImageEmbedding> EmbedAsync(
@@ -31,6 +36,15 @@ public sealed class OnnxImageEmbeddingService : IImageEmbeddingService, IDisposa
         var embedding = Run(session, metadata, inputTensor);
 
         return Task.FromResult(new ImageEmbedding(Normalize(embedding)));
+    }
+
+    /// <summary>True once the ONNX session and metadata have been materialized.</summary>
+    public bool IsLoaded => _session is not null;
+
+    /// <summary>Eagerly creates the ONNX session and loads the metadata file.</summary>
+    public void LoadModel()
+    {
+        _ = EnsureLoaded();
     }
 
     public void Dispose()

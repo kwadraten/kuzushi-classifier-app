@@ -4,28 +4,26 @@ using Microsoft.Extensions.Logging;
 // Plugin entry point: stdio MCP server only. Never touches Avalonia or any UI.
 // stdout carries JSON-RPC exclusively; all diagnostics go to stderr.
 
-string? dataRoot = null;
-for (var i = 0; i < args.Length; i++)
+PluginLaunchOptions? options;
+try
 {
-    switch (args[i])
-    {
-        case "--data-root" when i + 1 < args.Length:
-            dataRoot = args[++i];
-            break;
-        case "--help" or "-h":
-            Console.Error.WriteLine(
-                "Usage: KuzushiClassifierApp.Plugin.exe [--data-root <path>]\n" +
-                "Runs a newline-delimited JSON-RPC MCP server on stdin/stdout.");
-            return 0;
-        default:
-            Console.Error.WriteLine($"Unknown argument: {args[i]}");
-            return 2;
-    }
+    options = PluginLaunchOptions.Parse(args);
+}
+catch (ArgumentException exception)
+{
+    Console.Error.WriteLine(exception.Message);
+    return 2;
+}
+
+if (options is null)
+{
+    Console.Error.WriteLine(PluginLaunchOptions.UsageText);
+    return 0;
 }
 
 try
 {
-    using var services = PluginServices.Create(dataRoot);
+    using var services = PluginServices.Create(options.DataRoot, options.ManagedFiles);
     var logger = services.LoggerFactory.CreateLogger("KuzushiClassifierApp.Plugin");
     var server = new McpServer(services.Dispatcher, logger);
 

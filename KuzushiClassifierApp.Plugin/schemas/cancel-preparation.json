@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kwadraten.dev/kuzushi-classifier/schemas/cancel-preparation.json",
+  "title": "Kuzushi Classifier cancel_preparation args",
+  "description": "Args for the 'control' endpoint cancel_preparation action: an empty object.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}
