@@ -2,6 +2,8 @@ using System.Text.Json.Nodes;
 using KuzushiClassifierApp.Controllers;
 using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Services;
+using Microsoft.Extensions.Logging;
+using ZLogger;
 
 namespace KuzushiClassifierApp.Plugin;
 
@@ -19,6 +21,8 @@ public sealed class PluginInference
     private readonly ClassificationController _classificationController;
     private readonly SimilaritySearchController _similaritySearchController;
     private readonly IEmbeddingIndexService _embeddingIndexService;
+    private readonly IImageLibraryService? _imageLibraryService;
+    private readonly ILogger? _logger;
     private readonly SemaphoreSlim _inferenceGate = new(1, 1);
     private bool _embeddingIndexBuilt;
 
@@ -26,12 +30,16 @@ public sealed class PluginInference
         PluginAssetProbe assetProbe,
         ClassificationController classificationController,
         SimilaritySearchController similaritySearchController,
-        IEmbeddingIndexService embeddingIndexService)
+        IEmbeddingIndexService embeddingIndexService,
+        IImageLibraryService? imageLibraryService = null,
+        ILogger? logger = null)
     {
         _assetProbe = assetProbe;
         _classificationController = classificationController;
         _similaritySearchController = similaritySearchController;
         _embeddingIndexService = embeddingIndexService;
+        _imageLibraryService = imageLibraryService;
+        _logger = logger;
     }
 
     /// <summary>Whether the streaming similarity index is actually built.</summary>
@@ -136,7 +144,8 @@ public sealed class PluginInference
             .ClassifyAsync(image, topK, cancellationToken)
             .ConfigureAwait(false);
 
-        return BuildResultPayload(prediction, null);
+        return await BuildResultPayloadAsync(prediction, null, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<JsonObject> SimilarCoreAsync(
@@ -150,7 +159,8 @@ public sealed class PluginInference
             .FindSimilarAsync(image, topK, cancellationToken)
             .ConfigureAwait(false);
 
-        return BuildResultPayload(null, similar);
+        return await BuildResultPayloadAsync(null, similar, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<JsonObject> AnalyzeCoreAsync(
@@ -168,7 +178,8 @@ public sealed class PluginInference
             .FindSimilarAsync(image, topK, cancellationToken)
             .ConfigureAwait(false);
 
-        return BuildResultPayload(prediction, similar);
+        return await BuildResultPayloadAsync(prediction, similar, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -201,9 +212,16 @@ public sealed class PluginInference
         _embeddingIndexBuilt = true;
     }
 
-    private static JsonObject BuildResultPayload(
+    /// <summary>
+    /// Builds the action result. Every similar_images entry additionally
+    /// carries the matched dataset image itself as image_base64/media_type so
+    /// hosts and views can render the thumbnail without a second round trip;
+    /// the fields are omitted for entries whose bytes cannot be resolved.
+    /// </summary>
+    private async Task<JsonObject> BuildResultPayloadAsync(
         KuzushiPrediction? prediction,
-        IReadOnlyList<SimilarImageResult>? similarImages)
+        IReadOnlyList<SimilarImageResult>? similarImages,
+        CancellationToken cancellationToken)
     {
         var candidates = new JsonArray();
         if (prediction is not null)
@@ -233,12 +251,22 @@ public sealed class PluginInference
                     continue;
                 }
 
-                similar.Add(new JsonObject
+                var entry = new JsonObject
                 {
                     ["id"] = result.Image.Id,
                     ["label"] = result.Image.Label,
                     ["similarity"] = result.Similarity,
-                });
+                };
+
+                var matched = await LoadSimilarImageAsync(result.Image, cancellationToken)
+                    .ConfigureAwait(false);
+                if (matched is not null)
+                {
+                    entry["image_base64"] = Convert.ToBase64String(matched.Bytes);
+                    entry["media_type"] = matched.MediaType;
+                }
+
+                similar.Add(entry);
             }
         }
 
@@ -247,5 +275,38 @@ public sealed class PluginInference
             ["candidates"] = candidates,
             ["similar_images"] = similar,
         };
+    }
+
+    /// <summary>
+    /// Resolves one matched image's bytes from the dataset. A thumbnail that
+    /// fails to load degrades the entry to metadata only — it never fails the
+    /// action — but is always logged per the no-silent-errors rule.
+    /// </summary>
+    private async Task<KuzushiImage?> LoadSimilarImageAsync(
+        DatasetImage image,
+        CancellationToken cancellationToken)
+    {
+        if (_imageLibraryService is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _imageLibraryService
+                .LoadImageAsync(image, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger?.ZLogWarning(
+                ex,
+                $"Failed to resolve image bytes for similar result '{image.Id}'.");
+            return null;
+        }
     }
 }

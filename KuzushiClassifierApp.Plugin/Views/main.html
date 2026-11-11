@@ -98,7 +98,7 @@
   .status-dot-pending { background: var(--outline-variant); }
   .status-dot-error { background: #D13438; }
 
-  .candidate-row, .similar-row {
+  .candidate-row {
     display: flex;
     justify-content: space-between;
     padding: 6px 4px;
@@ -106,8 +106,69 @@
     font-size: 14px;
   }
 
-  .candidate-label, .similar-label { font-weight: 600; }
-  .candidate-score, .similar-score { color: var(--on-surface-variant); font-variant-numeric: tabular-nums; }
+  .candidate-label { font-weight: 600; }
+  .candidate-score { color: var(--on-surface-variant); font-variant-numeric: tabular-nums; }
+
+  /* ---------- Similar samples gallery (mirrors the AXAML wrap cards) ---------- */
+  .similar-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .similar-item {
+    width: 105px;
+    height: 130px;
+    border: 1px solid var(--outline-variant);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface-low);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .similar-thumb {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--on-surface-variant);
+    font-size: 10px;
+    overflow: hidden;
+  }
+
+  .similar-thumb img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  .similar-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.63);
+    color: #FFFFFF;
+    border-radius: 4px;
+    padding: 2px 4px;
+    font-size: 8px;
+    font-weight: 700;
+  }
+
+  .similar-caption {
+    background: var(--surface-container-highest);
+    color: var(--on-surface);
+    padding: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .status-text {
     font-size: 12px;
@@ -532,6 +593,36 @@
     }
   });
 
+  /* Ctrl+V paste: a clipboard image lands directly in the upload pane,
+     replacing whatever is currently staged there. */
+  document.addEventListener("paste", function (e) {
+    var data = e.clipboardData;
+    if (!data) { return; }
+    var file = null;
+    var i;
+    if (data.items) {
+      for (i = 0; i < data.items.length; i++) {
+        var item = data.items[i];
+        if (item.kind === "file" && item.type && item.type.indexOf("image/") === 0) {
+          file = item.getAsFile();
+          break;
+        }
+      }
+    }
+    if (!file && data.files) {
+      for (i = 0; i < data.files.length; i++) {
+        if (data.files[i].type && data.files[i].type.indexOf("image/") === 0) {
+          file = data.files[i];
+          break;
+        }
+      }
+    }
+    if (!file) { return; }
+    e.preventDefault();
+    selectTab(0);
+    showPreview(file);
+  });
+
   /* ---- Handwriting canvas: 8px round black strokes (matches AXAML Line) ---- */
   var canvas = document.getElementById("hwCanvas");
   var ctx = canvas.getContext("2d");
@@ -861,6 +952,8 @@
     });
   }
 
+  /* similar_images entries carry the matched dataset image as
+     image_base64/media_type; entries without bytes degrade to an id tile. */
   function renderSimilar(similar) {
     similarArea.textContent = "";
     similarArea.classList.remove("empty-state", "empty-state-tall");
@@ -868,20 +961,39 @@
       similarArea.textContent = "未返回相似样本。";
       return;
     }
+    var grid = document.createElement("div");
+    grid.className = "similar-grid";
     similar.forEach(function (entry) {
-      var row = document.createElement("div");
-      row.className = "similar-row";
-      var label = document.createElement("span");
-      label.className = "similar-label";
-      label.textContent = String(entry.label) + " (" + String(entry.id) + ")";
-      var score = document.createElement("span");
-      score.className = "similar-score";
-      score.textContent = typeof entry.similarity === "number"
-        ? entry.similarity.toFixed(3) : "";
-      row.appendChild(label);
-      row.appendChild(score);
-      similarArea.appendChild(row);
+      var item = document.createElement("div");
+      item.className = "similar-item";
+      item.title = String(entry.id);
+
+      var thumb = document.createElement("div");
+      thumb.className = "similar-thumb";
+      if (entry.image_base64) {
+        var img = document.createElement("img");
+        img.alt = String(entry.label);
+        img.src = "data:" + (entry.media_type || "image/webp") +
+          ";base64," + String(entry.image_base64);
+        thumb.appendChild(img);
+      } else {
+        thumb.textContent = String(entry.id);
+      }
+      var badge = document.createElement("span");
+      badge.className = "similar-badge";
+      badge.textContent = typeof entry.similarity === "number"
+        ? Math.round(entry.similarity * 100) + "% 匹配" : "";
+      thumb.appendChild(badge);
+
+      var caption = document.createElement("div");
+      caption.className = "similar-caption";
+      caption.textContent = String(entry.label);
+
+      item.appendChild(thumb);
+      item.appendChild(caption);
+      grid.appendChild(item);
     });
+    similarArea.appendChild(grid);
   }
 
   /* ---- Boot: bridge check, then real status ---- */

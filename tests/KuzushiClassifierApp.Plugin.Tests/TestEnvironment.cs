@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using KuzushiClassifierApp.Models;
 using KuzushiClassifierApp.Platform;
 using KuzushiClassifierApp.Plugin;
@@ -217,6 +218,38 @@ internal sealed class FakeEmbeddingIndexService : IEmbeddingIndexService
             new(new DatasetImage("img-1", "あ"), 0.98f),
             new(new DatasetImage("img-2", "い"), 0.87f),
         });
+    }
+}
+
+/// <summary>
+/// Serves a fixed tiny WebP for any requested dataset image, mirroring the
+/// real Parquet-backed library's behavior of returning embedded WebP bytes.
+/// </summary>
+internal sealed class FakeImageLibraryService : IImageLibraryService
+{
+    public Task<IReadOnlyList<DatasetImage>> LoadImagesAsync(
+        CancellationToken cancellationToken = default,
+        IProgress<AssetPreparationProgress>? progress = null)
+    {
+        return Task.FromResult<IReadOnlyList<DatasetImage>>(Array.Empty<DatasetImage>());
+    }
+
+    public Task<KuzushiImage> LoadImageAsync(
+        DatasetImage image,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(KuzushiImage.FromBytes(
+            Convert.FromBase64String(TestImages.EncodeBase64(SKEncodedImageFormat.Webp, 8, 8)),
+            $"{image.Id}.webp",
+            "image/webp",
+            image.Id));
+    }
+
+    public async IAsyncEnumerable<(DatasetImage Metadata, KuzushiImage Image)> StreamAllImagesAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await Task.CompletedTask.ConfigureAwait(false);
+        yield break;
     }
 }
 

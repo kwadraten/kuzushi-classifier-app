@@ -13,7 +13,7 @@ namespace KuzushiClassifierApp.Plugin;
 public sealed class PluginDispatcher
 {
     public const string PluginId = "kwadraten.kuzushi-classifier";
-    public const string PluginVersion = "0.3.1";
+    public const string PluginVersion = "0.4.0";
     public const string PluginRootUri = "patchouli://plugin/" + PluginId + "/";
 
     private const int DefaultLimit = 20;

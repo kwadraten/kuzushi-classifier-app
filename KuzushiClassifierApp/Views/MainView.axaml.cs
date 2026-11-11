@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -18,6 +19,7 @@ namespace KuzushiClassifierApp.Views;
 public partial class MainView : UserControl
 {
     private Point? _lastPoint;
+    private TopLevel? _keyHookTopLevel;
 
     public MainView()
     {
@@ -26,6 +28,77 @@ public partial class MainView : UserControl
         // Add drag & drop handlers
         AddHandler(DragDrop.DragOverEvent, DragOverHandler);
         AddHandler(DragDrop.DropEvent, DropHandler);
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _keyHookTopLevel = TopLevel.GetTopLevel(this);
+        _keyHookTopLevel?.AddHandler(
+            InputElement.KeyDownEvent,
+            OnKeyDownHandler,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        _keyHookTopLevel?.RemoveHandler(InputElement.KeyDownEvent, OnKeyDownHandler);
+        _keyHookTopLevel = null;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    // Ctrl+V (Cmd+V on macOS): a clipboard image lands directly in the upload
+    // pane's preview area, exactly like a picked file.
+    private void OnKeyDownHandler(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.V
+            || (e.KeyModifiers != KeyModifiers.Control && e.KeyModifiers != KeyModifiers.Meta))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _ = PasteClipboardImageAsync();
+    }
+
+    private async Task PasteClipboardImageAsync()
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null || DataContext is not MainViewModel vm)
+        {
+            return;
+        }
+
+        try
+        {
+            var bitmap = await clipboard.TryGetBitmapAsync();
+            if (bitmap is not null)
+            {
+                using (bitmap)
+                {
+                    using var stream = new MemoryStream();
+                    bitmap.Save(stream);
+                    vm.SetPastedImage(stream.ToArray());
+                }
+                return;
+            }
+
+            var files = await clipboard.TryGetFilesAsync();
+            var path = files?
+                .Select(file => file.TryGetLocalPath())
+                .FirstOrDefault(localPath => !string.IsNullOrEmpty(localPath));
+            if (path is not null)
+            {
+                vm.ActiveTab = 0;
+                await vm.SelectImageAsync(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            vm.StartupStatusText = $"粘贴图片失败: {ex.Message}";
+            vm.Logger.ZLogError(ex, $"Failed to paste an image from the clipboard.");
+        }
     }
 
     private void DragOverHandler(object? sender, DragEventArgs e)

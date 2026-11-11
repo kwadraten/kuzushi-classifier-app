@@ -34,7 +34,15 @@
         "properties": {
           "id": { "type": "string" },
           "label": { "type": "string" },
-          "similarity": { "type": "number", "minimum": -1, "maximum": 1 }
+          "similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+          "image_base64": {
+            "type": "string",
+            "description": "Base64-encoded bytes of the matched dataset image, resolved from the embedding Parquet's embedded WebP payloads; omitted when the bytes could not be resolved."
+          },
+          "media_type": {
+            "enum": ["image/png", "image/jpeg", "image/webp"],
+            "description": "Media type of image_base64; the bundled dataset stores image/webp."
+          }
         }
       }
     }

@@ -222,6 +222,23 @@ public partial class MainViewModel : ViewModelBase
         ResetResults();
     }
 
+    /// <summary>
+    /// Stages an image pasted from the clipboard. The pasted image lands
+    /// directly in the upload pane's preview area (the candidate slot).
+    /// </summary>
+    [RelayCommand]
+    public void SetPastedImage(byte[] bytes)
+    {
+        ActiveTab = 0;
+        _selectedImageBytes = bytes;
+        SelectedImagePath = "Clipboard_Pasted.png";
+
+        using var ms = new MemoryStream(bytes);
+        SelectedImagePreview = new Bitmap(ms);
+
+        ResetResults();
+    }
+
     [RelayCommand]
     public void Reset()
     {

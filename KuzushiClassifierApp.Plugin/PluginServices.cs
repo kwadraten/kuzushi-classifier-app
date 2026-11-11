@@ -88,7 +88,9 @@ public sealed class PluginServices : IDisposable
             assetProbe,
             classificationController,
             similaritySearchController,
-            embeddingIndexService);
+            embeddingIndexService,
+            imageLibraryService,
+            loggerFactory.CreateLogger<PluginInference>());
 
         // Local-only preparation: the same cache/index/model services inference uses,
         // so a confirmed prepare_assets produces genuinely usable runtime state. The
@@ -195,14 +197,16 @@ public sealed class PluginServices : IDisposable
         IImageClassifierService classifier,
         IImageEmbeddingService embedding,
         IEmbeddingIndexService embeddingIndex,
-        PluginPreparation? preparation = null)
+        PluginPreparation? preparation = null,
+        IImageLibraryService? imageLibrary = null)
     {
         var preprocessing = new PassThroughImagePreprocessingService();
         var inference = new PluginInference(
             assetProbe,
             new ClassificationController(preprocessing, classifier),
             new SimilaritySearchController(preprocessing, embedding, embeddingIndex),
-            embeddingIndex);
+            embeddingIndex,
+            imageLibrary);
 
         return new PluginDispatcher(
             assetProbe, inference, new ResultStore(), new DedupeStore(), preparation);

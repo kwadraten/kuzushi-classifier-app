@@ -91,6 +91,11 @@ public sealed class RealModelTests
             Assert.NotEmpty(image!["id"]!.GetValue<string>());
             Assert.NotEmpty(image["label"]!.GetValue<string>());
             Assert.True(float.IsFinite(image["similarity"]!.GetValue<float>()));
+
+            // The embedded WebP thumbnail resolves through the real library.
+            Assert.NotEmpty(Convert.FromBase64String(
+                image["image_base64"]!.GetValue<string>()));
+            Assert.Equal("image/webp", image["media_type"]!.GetValue<string>());
         }
 
         _output.WriteLine(
@@ -118,7 +123,9 @@ public sealed class RealModelTests
             appData, NullLogger<ParquetFileEmbeddingCacheService>.Instance);
         var index = new ParquetStreamingEmbeddingIndexService(cacheService);
 
-        var dispatcher = PluginServices.CreateDispatcher(probe, classifier, embedding, index);
+        var imageLibrary = new StreamingParquetImageLibraryService(paths.DatasetParquetPath);
+        var dispatcher = PluginServices.CreateDispatcher(
+            probe, classifier, embedding, index, imageLibrary: imageLibrary);
         return new RealContext(dispatcher, report, classifier, embedding);
     }
 

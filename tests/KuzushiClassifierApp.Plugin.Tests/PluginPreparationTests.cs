@@ -66,7 +66,7 @@ public sealed class PluginPreparationTests : IDisposable
                 await client.RequestAsync(McpMessages.Fetch(1, "status.json")))
                 ["content"]!.GetValue<string>())!;
 
-        Assert.Equal("0.3.1", status["version"]!.GetValue<string>());
+        Assert.Equal("0.4.0", status["version"]!.GetValue<string>());
         var prep = Assert.IsAssignableFrom<JsonObject>(status["preparation"]);
         Assert.Equal("idle", prep["state"]!.GetValue<string>());
         Assert.False(prep["models_loaded"]!.GetValue<bool>());

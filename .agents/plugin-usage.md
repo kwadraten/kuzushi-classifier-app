@@ -122,7 +122,11 @@ own `files/` surface, not the plugin's.
   id with a different message is `REVISION_CONFLICT`.
 
 Success: `{state:"completed", result:{result_id, action, resource_uri,
-candidates, similar_images}}`. Errors: `isError=true` with
+candidates, similar_images}}`. Every `similar_images` entry additionally
+carries `image_base64` + `media_type` — the matched dataset image resolved
+from the Parquet's embedded WebP payloads — so hosts and views can render
+the thumbnail directly; both fields are omitted for entries whose bytes
+could not be resolved. Errors: `isError=true` with
 `{error:{code,message}}` — `INVALID_ARGUMENT`, `NOT_FOUND`, `UNAVAILABLE`,
 `REVISION_CONFLICT`, `UNSUPPORTED_OPERATION`, `CANCELLED`.
 
@@ -170,5 +174,10 @@ once the host reports them ready. The view uses them to:
   `prepare_assets {allow_download:false}` for the local load.
 - Drive the predict button through `send("control","analyze",
   {image_base64, media_type, top_k:10})` with the uploaded image or the
-  white-backed handwriting canvas, rendering candidates/similar rows with
-  `textContent` only.
+  white-backed handwriting canvas, rendering candidates with `textContent`
+  and the similar samples as a thumbnail gallery fed by each entry's
+  `image_base64`/`media_type` (`data:` URLs, the only `img-src` the view CSP
+  allows).
+- Accept Ctrl+V paste anywhere in the view: a clipboard image lands
+  directly in the upload pane's staging preview, replacing the currently
+  staged image.

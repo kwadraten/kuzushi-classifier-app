@@ -27,7 +27,8 @@ public sealed class SendDispatchTests : IDisposable
             _root.CreateProbe(),
             _classifier,
             new FakeEmbeddingService(),
-            _index);
+            _index,
+            imageLibrary: new FakeImageLibraryService());
         _client = new McpClientConnection(dispatcher);
     }
 
@@ -93,6 +94,13 @@ public sealed class SendDispatchTests : IDisposable
         Assert.Equal("img-1", images[0]!["id"]!.GetValue<string>());
         Assert.Equal("あ", images[0]!["label"]!.GetValue<string>());
         Assert.True(images[0]!["similarity"]!.GetValue<float>() is > -1f and <= 1f);
+
+        // Matched images travel inside the result so hosts can render them.
+        var encoded = images[0]!["image_base64"]!.GetValue<string>();
+        Assert.NotEmpty(encoded);
+        Assert.NotEmpty(Convert.FromBase64String(encoded));
+        Assert.Equal("image/webp", images[0]!["media_type"]!.GetValue<string>());
+
         Assert.True(_index.BuildCalled);
         await _client.ShutdownAsync();
     }
